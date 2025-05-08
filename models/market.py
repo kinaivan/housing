@@ -29,7 +29,6 @@ class RentalMarket:
         return vacant / len(self.units) if self.units else 0
 
     def _calculate_location_premiums(self):
-        # Calculate location-based rent premiums
         location_rents = defaultdict(list)
         for unit in self.units:
             location_rents[round(unit.location, 1)].append(unit.rent)
@@ -39,7 +38,6 @@ class RentalMarket:
         }
 
     def update_market_conditions(self):
-        # Update market conditions based on current state
         self.market_conditions.update({
             'average_rent': self._calculate_average_rent(),
             'vacancy_rate': self._calculate_vacancy_rate(),
@@ -52,10 +50,7 @@ class RentalMarket:
             current_rent = self._calculate_average_rent()
             self.market_conditions['price_index'] = (current_rent / base_rent) * 100
 
-        # Store historical data
         self._store_historical_data()
-
-        # Update market demand based on various factors
         self._update_market_demand()
 
     def _store_historical_data(self):
@@ -65,7 +60,6 @@ class RentalMarket:
         self.historical_data['demand_levels'].append(self.market_conditions['market_demand'])
 
     def _update_market_demand(self):
-        # Update market demand based on various factors
         vacancy_factor = 1 - self.market_conditions['vacancy_rate']
         price_factor = 1 - (self.market_conditions['price_index'] / 100 - 1)
         economic_factor = 1.0  # Could be updated based on external economic conditions
@@ -118,26 +112,22 @@ class RentalMarket:
         return None
 
     def _calculate_unit_utility(self, unit, max_rent, preference, size_preference, location_preference):
-        # Calculate utility score based on multiple factors
         quality_score = unit.quality * (preference or 0.5)
         price_score = (1 - unit.rent / max_rent) * (1 - (preference or 0.5))
         
-        # Size matching with more weight
         size_score = 0
         if size_preference is not None:
             size_diff = abs(unit.size - size_preference)
             size_score = 1 - (size_diff / max(unit.size, size_preference))
             size_score = size_score ** 2  # Square to give more weight to good matches
 
-        # Location matching with more weight
         location_score = 0
         if location_preference is not None:
             location_diff = abs(unit.location - location_preference)
             location_score = 1 - location_diff
-            location_score = location_score ** 2  # Square to give more weight to good matches
+            location_score = location_score ** 2
 
-        # Amenity score with more weight
-        amenity_score = unit.amenity_score ** 2  # Square to give more weight to good amenities
+        amenity_score = unit.amenity_score ** 2
 
         # Updated weights to reflect importance
         weights = {
@@ -155,7 +145,6 @@ class RentalMarket:
             location_score * weights['location'] +
             amenity_score * weights['amenities']
         )
-
         return utility
 
     def find_acceptable_unit(self, max_rent, min_quality=0.5, min_size=1):

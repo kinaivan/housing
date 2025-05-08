@@ -27,15 +27,22 @@ class Simulation:
         self.rental_market.update_market_conditions()
         market_conditions = self.rental_market.market_conditions
 
-        # Update landlords and their units
-        for landlord in self.landlords:
-            landlord.update(market_conditions)
-            landlord.update_rents(self.policy, market_conditions)
-
         # Update households
         for household in self.households:
             household.update_month(year, month)
             household.consider_moving(self.rental_market, self.policy, year, month)
+
+            # Force eviction if rent burden is too high
+            if household.housed and household.current_rent_burden() > 0.6:
+                household.contract.unit.vacate()
+                household.contract = None
+                household.housed = False
+                household.satisfaction = 0
+
+        # Update landlords and their units
+        for landlord in self.landlords:
+            landlord.update(market_conditions)
+            landlord.update_rents(self.policy, market_conditions)
 
         # Government inspects units
         for landlord in self.landlords:
@@ -47,10 +54,8 @@ class Simulation:
         for landlord in self.landlords:
             landlord.collect_rent()
 
-        # Record detailed metrics
+        # Record metrics
         self._record_detailed_metrics(year, month)
-    
-        # Record basic metrics
         self._record_basic_metrics(year, month)
 
     def _record_detailed_metrics(self, year, month):
@@ -130,7 +135,6 @@ class Simulation:
                 self.step(year, month)
 
     def report(self):
-        # Print basic metrics
         print("\nBasic Metrics:")
         for m in self.metrics:
             print(f"{m['year']:>4}-{m['month']:>02} | "
@@ -140,7 +144,6 @@ class Simulation:
                   f"Profit: {m['profit']:.0f} | "
                   f"Violations: {m['violations']}")
 
-        # Print summary statistics
         print("\nSummary Statistics:")
         final_metrics = self.metrics[-1]
         print(f"Final Average Income: ${final_metrics['avg_income']:.2f}")
@@ -150,7 +153,6 @@ class Simulation:
         print(f"Final Mobility Rate: {final_metrics['mobility_rate']:.2%}")
         print(f"Total Renovations: {final_metrics['renovation_count']}")
 
-        # Print life stage distribution
         print("\nFinal Life Stage Distribution:")
         life_stages = self.detailed_metrics['life_stage_distribution'][f"{self.years}-12"]
         for stage, count in life_stages.items():

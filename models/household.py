@@ -68,7 +68,7 @@ class Household:
             self.months_in_current_unit += 1
         self.calculate_satisfaction()
         
-        # Life stage transition with more sophisticated logic
+        # Life stage transition
         self._update_life_stage()
         
         # Add timeline entry
@@ -105,28 +105,28 @@ class Household:
         elif self.life_stage == "family_formation":
             self.size_preference = max(self.size_preference, 2)
             self.quality_preference *= 1.2
-            self.location_preference *= 0.9  # Less emphasis on location
-            self.mobility_preference *= 0.8  # Less likely to move
-            self.cost_sensitivity *= 0.9  # Less sensitive to costs
+            self.location_preference *= 0.9
+            self.mobility_preference *= 0.8  
+            self.cost_sensitivity *= 0.9
         elif self.life_stage == "established":
             self.quality_preference *= 1.3
             self.cost_sensitivity *= 0.8
-            self.mobility_preference *= 0.7  # Even less likely to move
-            self.location_preference *= 0.8  # Less emphasis on location
-        else:  # retirement
+            self.mobility_preference *= 0.7  
+            self.location_preference *= 0.8
+        else:
             self.cost_sensitivity *= 1.2
-            self.mobility_preference *= 0.6  # Least likely to move
-            self.quality_preference *= 1.1  # More emphasis on quality
-            self.location_preference *= 0.7  # Less emphasis on location
+            self.mobility_preference *= 0.6
+            self.quality_preference *= 1.1
+            self.location_preference *= 0.7 
 
     def adjust_income(self):
         # More sophisticated income adjustment based on life stage
         base_drift = random.uniform(-0.02, 0.05)
         life_stage_multiplier = {
-            "young_adult": 1.2,  # Higher income growth
+            "young_adult": 1.2,
             "family_formation": 1.1,
             "established": 1.0,
-            "retirement": 0.8  # Lower income growth
+            "retirement": 0.8
         }
         drift = base_drift * life_stage_multiplier[self.life_stage]
         self.income = max(500, self.income * (1 + drift))
@@ -159,7 +159,7 @@ class Household:
 
         # Weighted satisfaction calculation
         weights = {
-            'rent_burden': self.cost_sensitivity,
+            'rent_burden': self.cost_sensitivity*10,
             'quality': self.quality_preference,
             'size': 0.3,
             'location': self.location_preference,
@@ -181,7 +181,6 @@ class Household:
             self._search_for_housing(market, policy, year, month)
             return
 
-        # More sophisticated moving decision
         base_move_chance = 1 - self.satisfaction
         time_factor = min(1, self.months_in_current_unit / 24)  # Less likely to move if recently moved
         life_stage_factor = {
@@ -210,7 +209,10 @@ class Household:
             location_preference=self.location_preference
         )
 
-        if best_unit and best_unit.rent <= policy.max_rent_for_income(self.income):
+        if best_unit and best_unit.rent <= min(
+            policy.max_rent_for_income(self.income),
+            0.5 * self.income
+        ):
             self.move_to(best_unit, year, month)
             self.search_duration = 0
 

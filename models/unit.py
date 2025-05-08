@@ -13,7 +13,7 @@ class RentalUnit:
         self.violations = 0
         self.vacancy_duration = 0
         self.last_renovation = 0
-        self.maintenance_cost = base_rent * 0.1  # 10% of rent for maintenance
+        self.maintenance_cost = base_rent * 0.1
         
         # Location attributes
         self.location = location or random.uniform(0, 1)  # 0 = suburban, 1 = central
@@ -54,8 +54,7 @@ class RentalUnit:
         return score
 
     def _calculate_location_score(self):
-        # Location score based on distance from center and other factors
-        base_score = 1 - abs(0.5 - self.location)  # Higher score for central locations
+        base_score = 1 - abs(0.5 - self.location)
         return base_score
 
     def assign(self, tenant):
@@ -77,7 +76,6 @@ class RentalUnit:
         self._update_market_demand(market_conditions)
 
     def _adjust_rent_for_vacancy(self):
-        # More sophisticated vacancy adjustment
         vacancy_factor = min(1.0, self.vacancy_duration / 6)  # Max effect after 6 months
         reduction = self.rent * 0.05 * vacancy_factor  # Up to 5% reduction per month
         self.rent = max(self.base_rent * 0.7, self.rent - reduction)  # Never below 70% of base rent
@@ -94,7 +92,6 @@ class RentalUnit:
         self.rent *= 1.1  # Increase rent after renovation
 
     def _update_market_demand(self, market_conditions):
-        # Update market demand based on various factors
         base_demand = market_conditions.get('base_demand', 0.5)
         location_factor = self.location_score
         price_factor = 1 - (self.rent / market_conditions.get('average_rent', self.rent))
@@ -134,14 +131,11 @@ class Landlord:
     def update_rents(self, policy, market_conditions):
         for unit in self.units:
             if not unit.occupied:
-                # More sophisticated vacancy handling
                 self._handle_vacant_unit(unit, market_conditions)
             else:
-                # More sophisticated rent adjustment
                 self._adjust_occupied_unit_rent(unit, policy, market_conditions)
 
     def _handle_vacant_unit(self, unit, market_conditions):
-        # Consider market conditions and unit characteristics
         market_demand = market_conditions.get('market_demand', 0.5)
         average_rent = market_conditions.get('average_rent', unit.rent)
         
@@ -185,12 +179,7 @@ class Landlord:
                 self.maintenance_budget += maintenance_cost
 
     def update(self, market_conditions):
-        # Update all units
         for unit in self.units:
             unit.update(market_conditions)
-        
-        # Update rents based on market conditions
         self.update_rents(None, market_conditions)  # Policy is handled separately
-        
-        # Collect rent
         self.collect_rent()
