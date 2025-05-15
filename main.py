@@ -10,13 +10,14 @@ from models.unit import RentalUnit, Landlord
 from models.market import RentalMarket
 from models.policy import RentCapPolicy
 from simulation.runner import Simulation
+from visualization.animated_sim import HousingVisualization
 
 if __name__ == "__main__":
     # 1) Styling
     plt.style.use('seaborn-v0_8')
     sns.set_theme()
 
-    # 2) Build a small “prototype” population & housing stock
+    # 2) Build a small "prototype" population & housing stock
     random.seed(123)
     base_households = []
     for i in range(100):
@@ -83,7 +84,7 @@ if __name__ == "__main__":
     sim_nocap = Simulation(hh_nocap, ll_nocap, market_nocap, policy_nocap, years=2)
     sim_nocap.run()
 
-    # 6) Extract time‐series & final stock stats
+    # 6) Extract time-series & final stock stats
     months            = [f"{m['year']}-{m['month']:02}" for m in sim_cap.metrics]
     sat_cap          = [m['satisfaction'] for m in sim_cap.metrics]
     sat_nocap        = [m['satisfaction'] for m in sim_nocap.metrics]
@@ -164,3 +165,16 @@ if __name__ == "__main__":
     print(f"Avg Vacancy      → Cap: {np.mean(vac_cap):.3f}       NoCap: {np.mean(vac_nocap):.3f}")
     print(f"Final Profit     → Cap: {sim_cap.metrics[-1]['profit']:.0f}   NoCap: {sim_nocap.metrics[-1]['profit']:.0f}")
     print(f"Total Violations → Cap: {sim_cap.metrics[-1]['violations']}   NoCap: {sim_nocap.metrics[-1]['violations']}")
+
+    # 9) Create animated visualizations
+    print("\nCreating visualizations...")
+    
+    # Create visualization for scenario with rent cap
+    print("\n1. With Rent Cap:")
+    vis_cap = HousingVisualization(sim_cap)
+    vis_cap.animate()
+    
+    # Create visualization for scenario without rent cap
+    print("\n2. Without Rent Cap:")
+    vis_nocap = HousingVisualization(sim_nocap)
+    vis_nocap.animate()

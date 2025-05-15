@@ -21,6 +21,7 @@ class Simulation:
             'renovation_events': [],
             'market_conditions': []
         }
+        self.occupancy_history = []  # NEW: list of lists of (unit_id, household_id, household_size)
 
     def step(self, year, month):
         # Update market conditions
@@ -57,6 +58,15 @@ class Simulation:
         # Record metrics
         self._record_detailed_metrics(year, month)
         self._record_basic_metrics(year, month)
+
+        # NEW: Record occupancy for this step
+        step_occupancy = []
+        for unit in self.rental_market.units:
+            if unit.occupied and unit.tenant:
+                step_occupancy.append((unit.id, unit.tenant.id, unit.tenant.size))
+            else:
+                step_occupancy.append((unit.id, None, 0))
+        self.occupancy_history.append(step_occupancy)
 
     def _record_detailed_metrics(self, year, month):
         # Record life stage distribution
