@@ -9,7 +9,7 @@ def new_timeline_entry(info, year, month):
     return TimeLineEntry(year, month, info)
 
 class Household:
-    def __init__(self, id, age, size, income, wealth, contract=None):
+    def __init__(self, id, age, size, income, wealth, contract=None, is_owner_occupier=False, mortgage_balance=0, mortgage_interest_rate=0.03, mortgage_term=30):
         self.id = id
         self.age = age
         self.size = size
@@ -39,6 +39,18 @@ class Household:
         self.search_duration = 0
         self.max_search_duration = int(12 * (1 - self.search_patience))  # Max months to search
 
+        # Mortgage attributes
+        self.is_owner_occupier = is_owner_occupier
+        self.mortgage_balance = mortgage_balance
+        self.mortgage_interest_rate = mortgage_interest_rate
+        self.mortgage_term = mortgage_term  # in years
+        self.mortgage_interest_paid = 0
+        self.monthly_payment = 0
+        if self.is_owner_occupier and self.mortgage_balance > 0:
+            r = self.mortgage_interest_rate / 12
+            n = self.mortgage_term * 12
+            self.monthly_payment = (self.mortgage_balance * r * (1 + r) ** n) / ((1 + r) ** n - 1)
+
     def _determine_life_stage(self):
         if self.age < 25:
             return "young_adult"
@@ -50,27 +62,35 @@ class Household:
             return "retirement"
 
     def current_rent_burden(self):
-        if self.contract and self.income > 0:
+        if self.is_owner_occupier:
+            # For owner-occupiers, use mortgage payment as housing cost
+            if hasattr(self, 'monthly_payment') and self.income > 0:
+                return self.monthly_payment / self.income
+            return 0
+        elif self.contract and self.income > 0:
             return self.contract.unit.rent / self.income
-        return None
+        return 0  # Return 0 instead of None for unhoused households
 
     def update_month(self, year, month):
         # Age increment is now more realistic (1/12 per month)
         self.age += 1/12
-        
-        # Income and wealth adjustments
+        # Income adjustment
         self.adjust_income()
+        # Wealth adjustment (always called)
         self.adjust_wealth()
-        
         # Update contract and satisfaction
-        if self.contract:
+        if self.is_owner_occupier:
+            self.process_mortgage_month()
+            if hasattr(self, 'mortgage_balance') and self.mortgage_balance > 0:
+                if hasattr(self, 'owned_unit') and self.owned_unit is not None:
+                    self.calculate_satisfaction_owner()
+            self.months_in_current_unit += 1
+        elif self.contract:
             self.contract.update()
             self.months_in_current_unit += 1
-        self.calculate_satisfaction()
-        
+            self.calculate_satisfaction()
         # Life stage transition
         self._update_life_stage()
-        
         # Add timeline entry
         self.add_event({
             "type": "MONTHLY_UPDATE",
@@ -176,7 +196,34 @@ class Household:
 
         self.satisfaction = max(0, min(1, satisfaction))
 
+    def calculate_satisfaction_owner(self):
+        # Owner-occupier satisfaction based on their owned unit
+        unit = getattr(self, 'owned_unit', None)
+        if not unit:
+            self.satisfaction = 0
+            return
+        # Use similar logic as rental satisfaction, but no rent burden
+        quality_score = unit.quality
+        size_match = 1 - abs(self.size - unit.size) / max(self.size, unit.size)
+        location_score = unit.location_score if hasattr(unit, 'location_score') else 0.5
+        amenity_score = unit.amenity_score if hasattr(unit, 'amenity_score') else 0.5
+        weights = {
+            'quality': self.quality_preference,
+            'size': 0.3,
+            'location': self.location_preference,
+            'amenities': self.amenity_preference
+        }
+        satisfaction = (
+            quality_score * weights['quality'] +
+            size_match * weights['size'] +
+            location_score * weights['location'] +
+            amenity_score * weights['amenities']
+        ) / sum(weights.values())
+        self.satisfaction = max(0, min(1, satisfaction))
+
     def consider_moving(self, market, policy, year, month):
+        if self.is_owner_occupier:
+            return  # Owner-occupiers do not move in this logic
         if not self.housed:
             self._search_for_housing(market, policy, year, month)
             return
@@ -249,6 +296,52 @@ class Household:
 
     def add_event(self, info, year, month):
         self.timeline.append(new_timeline_entry(info, year, month))
+
+    def process_mortgage_month(self):
+        if self.is_owner_occupier and self.mortgage_balance > 0:
+            r = self.mortgage_interest_rate / 12
+            interest = self.mortgage_balance * r
+            principal = self.monthly_payment - interest
+            self.mortgage_balance = max(0, self.mortgage_balance - principal)
+            self.wealth -= self.monthly_payment
+            self.mortgage_interest_paid += interest
+            # Dutch-style: interest is tax-deductible (simulate as income boost)
+            self.income += interest  # crude, but for visualization
+
+    def buy_home(self, unit):
+        # Remove from rental if currently renting
+        if self.contract:
+            self.contract.unit.vacate()
+            self.contract = None
+        # Pay down payment, set up mortgage
+        property_value = unit.base_rent * 12 * 20
+        down_payment = 0.2 * property_value
+        mortgage_balance = 0.8 * property_value
+        self.wealth -= down_payment
+        self.is_owner_occupier = True
+        self.mortgage_balance = mortgage_balance
+        self.mortgage_interest_rate = 0.03
+        self.mortgage_term = 30
+        r = self.mortgage_interest_rate / 12
+        n = self.mortgage_term * 12
+        self.monthly_payment = (mortgage_balance * r * (1 + r) ** n) / ((1 + r) ** n - 1)
+        self.housed = True
+        self.owned_unit = unit
+        unit.assign_owner(self)
+
+    def sell_home(self):
+        unit = getattr(self, 'owned_unit', None)
+        if unit is not None:
+            property_value = unit.base_rent * 12 * 20
+            equity = max(0, property_value - getattr(self, 'mortgage_balance', 0))
+            self.wealth += equity
+            self.mortgage_balance = 0
+            self.monthly_payment = 0
+            self.is_owner_occupier = False
+            self.owned_unit = None
+            unit.remove_owner()
+            self.housed = False
+            self.contract = None
 
 class Contract:
     def __init__(self, tenant, unit):

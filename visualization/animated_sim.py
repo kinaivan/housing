@@ -7,7 +7,7 @@ import random
 from matplotlib import cm
 
 class HousingVisualization:
-    def __init__(self, simulation):
+    def __init__(self, simulation, ax=None):
         # global style
         plt.rcParams.update({
             'font.family': 'DejaVu Sans',
@@ -18,8 +18,11 @@ class HousingVisualization:
             'figure.facecolor': '#f0f0f0'
         })
         self.sim = simulation
-        self.fig, self.ax = plt.subplots(figsize=(18, 12))
-        self.ax.set_facecolor('#eaeaf2')
+        if ax is None:
+            self.fig, self.ax = plt.subplots(figsize=(18, 12))
+        else:
+            self.ax = ax
+            self.fig = ax.figure
         self.paused = False
         self.anim = None
         self.house_patches = []
@@ -70,7 +73,14 @@ class HousingVisualization:
         self.cmap = cm.get_cmap('viridis')
 
     def _draw_house(self, x, y, rent, occupied, idx):
-        color = self.cmap(self.norm(rent)) if occupied else '#dddddd'
+        unit = self.sim.rental_market.units[idx]
+        # Distinguish owner-occupied houses
+        if getattr(unit, 'is_owner_occupied', False):
+            color = '#b3c6ff'  # light blue for owner-occupied
+            roof_color = '#3777c2'  # blue roof
+        else:
+            color = self.cmap(self.norm(rent)) if occupied else '#dddddd'
+            roof_color = '#d95f02'
         body = Rectangle(
             (x-0.45/2, y-0.36/2), 0.45, 0.36,
             facecolor=color, edgecolor='#333', linewidth=1.5, zorder=5, picker=True
@@ -79,7 +89,7 @@ class HousingVisualization:
             [(x-0.54/2, y+0.36/2),
              (x, y+0.36/2+0.18),
              (x+0.54/2, y+0.36/2)],
-            facecolor='#d95f02', edgecolor='#333', linewidth=1.5, zorder=6
+            facecolor=roof_color, edgecolor='#333', linewidth=1.5, zorder=6
         )
         self.ax.add_patch(body)
         self.ax.add_patch(roof)
@@ -148,6 +158,12 @@ class HousingVisualization:
         # sidebar
         stats_x = self.grid_size * self.spacing + 0.6
         stats_y = self.grid_size * self.spacing - 0.5
+        # Owner-occupier metrics
+        owner_units = [u for u in self.sim.rental_market.units if getattr(u, 'is_owner_occupied', False)]
+        owner_share = len(owner_units) / len(self.sim.rental_market.units)
+        avg_mortgage = np.mean([
+            getattr(u.owner, 'mortgage_balance', 0) for u in owner_units if u.owner is not None
+        ]) if owner_units else 0
         sidebar = (
             f"Month: {m['year']}-{m['month']:02d}\n\n"
             f"Avg Satisfaction: {m['satisfaction']:.2f}\n"
@@ -161,9 +177,14 @@ class HousingVisualization:
             f"Vacancy Rate: {m['vacancy_rate']:.1%}\n"
             f"Mobility Rate: {m['mobility_rate']:.1%}\n"
             f"Total Profit: ${m['profit']:.0f}\n"
-            f"Renovations: {m['renovation_count']}\n"
             f"Housed: {m['housed']} / {len(self.sim.households)}\n"
-            f"Violations: {m['violations']}"
+            f"Unhoused: {len(self.sim.households) - m['housed']}\n"
+            f"Vacant Units: {len([u for u in self.sim.rental_market.units if not u.occupied])}\n"
+            f"Violations: {m['violations']}\n"
+            f"Property Tax Paid: ${m.get('property_tax', 0):.0f}\n"
+            f"Wealth Tax Paid: ${m.get('wealth_tax', 0):.0f}\n"
+            f"Owner-Occupier Share: {owner_share:.1%}\n"
+            f"Avg Mortgage Balance: ${avg_mortgage:.0f}"
         )
         self.ax.text(
             stats_x, stats_y, sidebar,
@@ -188,25 +209,47 @@ class HousingVisualization:
                 unit = self.sim.rental_market.units[unit_idx]
                 occ = self.sim.occupancy_history[frame][unit_idx]
                 unit_id, hh_id, hh_size = occ
-                info = f"Rent: ${unit.rent:.0f}\nQuality: {unit.quality:.2f}\nLocation: {getattr(unit, 'location', 'N/A'):.2f}"
-                amenities = getattr(unit, 'amenities', None)
-                if amenities:
-                    amen_list = [k for k, v in amenities.items() if v]
-                    if amen_list:
-                        info += f"\nAmenities: {', '.join(amen_list)}"
-                if hh_id is not None:
-                    tenant = next((h for h in self.sim.households if h.id == hh_id), None)
-                    if tenant:
-                        info += (f"\n--- Tenant ---"
-                                 f"\nIncome: ${tenant.income:.0f}"
-                                 f"\nWealth: ${tenant.wealth:.0f}"
-                                 f"\nLife stage: {getattr(tenant, 'life_stage', 'N/A')}"
-                                 f"\nSatisfaction: {tenant.satisfaction:.2f}"
-                                 f"\nHousehold size: {tenant.size}")
+                # Property tax for this unit
+                property_value = unit.base_rent * 12 * 20
+                property_tax = (0.02 / 12) * property_value
+                if getattr(unit, 'is_owner_occupied', False):
+                    owner = getattr(unit, 'owner', None)
+                    info = f"OWNER-OCCUPIED\n"
+                    info += f"Quality: {unit.quality:.2f}\nLocation: {getattr(unit, 'location', 'N/A'):.2f}\nProperty value: ${property_value:.0f}\nProperty tax: ${property_tax:.0f}/mo"
+                    if owner:
+                        info += f"\n--- Owner ---"
+                        info += f"\nIncome: ${owner.income:.0f}"
+                        info += f"\nWealth: ${owner.wealth:.0f}"
+                        info += f"\nMortgage: ${getattr(owner, 'mortgage_balance', 0):.0f}"
+                        info += f"\nMonthly Payment: ${getattr(owner, 'monthly_payment', 0):.0f}"
+                        info += f"\nInterest Deduction: ${getattr(owner, 'mortgage_interest_paid', 0):.0f}/yr"
+                        info += f"\nLife stage: {getattr(owner, 'life_stage', 'N/A')}"
+                        info += f"\nSatisfaction: {getattr(owner, 'satisfaction', 0):.2f}"
+                        info += f"\nHousehold size: {owner.size}"
                 else:
-                    info += "\n(Vacant)"
+                    info = f"Rent: ${unit.rent:.0f}\nQuality: {unit.quality:.2f}\nLocation: {getattr(unit, 'location', 'N/A'):.2f}\nProperty value: ${property_value:.0f}\nProperty tax: ${property_tax:.0f}/mo"
+                    amenities = getattr(unit, 'amenities', None)
+                    if amenities:
+                        amen_list = [k for k, v in amenities.items() if v]
+                        if amen_list:
+                            info += f"\nAmenities: {', '.join(amen_list)}"
+                    if hh_id is not None:
+                        tenant = next((h for h in self.sim.households if h.id == hh_id), None)
+                        if tenant:
+                            # Wealth tax for this tenant
+                            taxable_wealth = max(0, tenant.wealth - 50000)
+                            wealth_tax = (0.012 / 12) * taxable_wealth
+                            info += (f"\n--- Tenant ---"
+                                     f"\nIncome: ${tenant.income:.0f}"
+                                     f"\nWealth: ${tenant.wealth:.0f}"
+                                     f"\nLife stage: {getattr(tenant, 'life_stage', 'N/A')}"
+                                     f"\nSatisfaction: {tenant.satisfaction:.2f}"
+                                     f"\nHousehold size: {tenant.size}"
+                                     f"\nWealth tax: ${wealth_tax:.0f}/mo")
+                    else:
+                        info += "\n(Vacant)"
                 self.tooltip.set_text(info)
-                self.tooltip.set_position((x, y+0.5))
+                self.tooltip.set_position((x, y + 0.7))
                 self.tooltip.set_visible(True)
                 self.fig.canvas.draw_idle()
                 return
@@ -229,3 +272,28 @@ class HousingVisualization:
         )
         plt.show()
         return self.anim
+
+    def animate_on_existing_axis(self, interval=1000):
+        """
+        Create the animation for this visualization on its axis, but do NOT call plt.show().
+        Returns the FuncAnimation object.
+        Usage for side-by-side comparison:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(36, 15))
+            vis1 = HousingVisualization(sim1, ax=ax1)
+            vis2 = HousingVisualization(sim2, ax=ax2)
+            ani1 = vis1.animate_on_existing_axis()
+            ani2 = vis2.animate_on_existing_axis()
+            plt.show()
+        """
+        self.anim = animation.FuncAnimation(
+            self.fig, self._update,
+            frames=len(self.sim.metrics),
+            interval=interval,
+            repeat=False
+        )
+        return self.anim
+
+    @classmethod
+    def with_new_figure(cls, simulation, figsize=(18, 12)):
+        fig, ax = plt.subplots(figsize=figsize)
+        return cls(simulation, ax=ax)

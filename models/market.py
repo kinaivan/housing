@@ -87,7 +87,7 @@ class RentalMarket:
         self.market_conditions['market_demand'] = max(0.1, min(0.9, self.market_conditions['market_demand']))
 
     def find_best_unit(self, max_rent, preference=None, size_preference=None, location_preference=None):
-        available = [u for u in self.units if not u.occupied and u.rent <= max_rent]
+        available = [u for u in self.units if not u.occupied and not getattr(u, 'is_owner_occupied', False) and u.rent <= max_rent]
         if not available:
             return None
 
@@ -151,6 +151,7 @@ class RentalMarket:
         available = [
             u for u in self.units 
             if not u.occupied 
+            and not getattr(u, 'is_owner_occupied', False)
             and u.rent <= max_rent 
             and u.quality >= min_quality
             and u.size >= min_size

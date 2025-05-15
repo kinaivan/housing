@@ -32,6 +32,9 @@ class RentalUnit:
         self.quality_degradation_rate = random.uniform(0.01, 0.03)  # Monthly quality decrease
         self.minimum_quality = 0.3  # Minimum quality before renovation needed
 
+        self.owner = None  # Household object if owner-occupied, else None
+        self.is_owner_occupied = False
+
     def _generate_amenities(self):
         amenities = {
             'parking': random.random() < 0.7,
@@ -116,6 +119,25 @@ class RentalUnit:
             new_rent = min(new_rent, rent_cap)
         self.rent = max(new_rent, self.base_rent * 0.7)  # ensure rent doesn't go too low
 
+    def assign_owner(self, owner):
+        self.owner = owner
+        self.is_owner_occupied = True
+        self.tenant = owner  # For visualization/occupancy
+        self.occupied = True
+        self.vacancy_duration = 0
+        # Remove from landlord if present
+        if hasattr(self, 'landlord') and self.landlord is not None:
+            self.landlord.remove_unit(self)
+            self.landlord = None
+
+    def remove_owner(self):
+        self.owner = None
+        self.is_owner_occupied = False
+        self.tenant = None
+        self.occupied = False
+        self.vacancy_duration = 0
+        # Unit is now available for rent; landlord assignment handled in simulation
+
 
 class Landlord:
     def __init__(self, id, units, is_compliant=True):
@@ -183,3 +205,11 @@ class Landlord:
             unit.update(market_conditions)
         self.update_rents(None, market_conditions)  # Policy is handled separately
         self.collect_rent()
+
+    def remove_unit(self, unit):
+        if unit in self.units:
+            self.units.remove(unit)
+
+    def add_unit(self, unit):
+        if unit not in self.units:
+            self.units.append(unit)
