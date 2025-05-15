@@ -89,9 +89,15 @@ class HousingVisualization:
     def _update(self, frame):
         if self.paused:
             return
-
         self.ax.cla()
         self._setup_plot()
+        self.house_patches = []  # Reset for this frame
+        # Re-create tooltip for this frame
+        self.tooltip = self.ax.text(0, 0, "", visible=False,
+                                    ha='center', va='bottom',
+                                    fontsize=9,
+                                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.95),
+                                    zorder=200)
 
         m = self.sim.metrics[frame]
         occ = self.sim.occupancy_history[frame]
@@ -172,9 +178,8 @@ class HousingVisualization:
 
     def on_hover(self, event):
         if not event.inaxes:
-            if self.tooltip:
-                self.tooltip.remove()
-                self.tooltip = None
+            self.tooltip.set_visible(False)
+            self.fig.canvas.draw_idle()
             return
         for patch, unit_idx, x, y in self.house_patches:
             contains, _ = patch.contains(event)
@@ -200,16 +205,13 @@ class HousingVisualization:
                                  f"\nHousehold size: {tenant.size}")
                 else:
                     info += "\n(Vacant)"
-                if self.tooltip:
-                    self.tooltip.remove()
-                self.tooltip = self.ax.text(x, y+0.5, info, ha='center', va='bottom', fontsize=9,
-                                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.95), zorder=200)
+                self.tooltip.set_text(info)
+                self.tooltip.set_position((x, y+0.5))
+                self.tooltip.set_visible(True)
                 self.fig.canvas.draw_idle()
                 return
-        if self.tooltip:
-            self.tooltip.remove()
-            self.tooltip = None
-            self.fig.canvas.draw_idle()
+        self.tooltip.set_visible(False)
+        self.fig.canvas.draw_idle()
 
     def _on_key_press(self, event):
         if event.key == ' ':
