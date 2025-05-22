@@ -168,6 +168,28 @@ class HousingVisualization:
         avg_mortgage = np.mean([
             getattr(u.owner, 'mortgage_balance', 0) for u in owner_units if u.owner is not None
         ]) if owner_units else 0
+
+        # Get movement logs for current frame
+        movement_logs = []
+        for household in self.sim.households:
+            if household.timeline:
+                # Get events from this month
+                current_month_events = [
+                    event for event in household.timeline 
+                    if event.year == self.sim.metrics[frame]['year'] 
+                    and event.month == self.sim.metrics[frame]['month']
+                    and event.record.get('type') == 'MOVED_IN'
+                ]
+                for event in current_month_events:
+                    move_info = (
+                        f"HH {household.id} moved to Unit {event.record['unit_id']}\n"
+                        f"Life stage: {event.record['life_stage']}\n"
+                        f"Satisfaction: {event.record['satisfaction']:.2f}\n"
+                        f"Rent: ${event.record['rent']:.0f}"
+                    )
+                    movement_logs.append(move_info)
+
+        # Combine stats and movement logs
         sidebar = (
             f"Month: {m['year']}-{m['month']:02d}\n\n"
             f"Avg Satisfaction: {m['satisfaction']:.2f}\n"
@@ -188,7 +210,8 @@ class HousingVisualization:
             f"Property Tax Paid: ${m.get('property_tax', 0):.0f}\n"
             f"Wealth Tax Paid: ${m.get('wealth_tax', 0):.0f}\n"
             f"Owner-Occupier Share: {owner_share:.1%}\n"
-            f"Avg Mortgage Balance: ${avg_mortgage:.0f}"
+            f"Avg Mortgage Balance: ${avg_mortgage:.0f}\n\n"
+            f"Movement Log:\n" + "\n".join(movement_logs) if movement_logs else ""
         )
         self.ax.text(
             stats_x, stats_y, sidebar,
@@ -329,59 +352,58 @@ def get_positions(n):
     return grid
 
 def export_frames(sim, filename):
-    import pickle
-    import numpy as np
-    n_units = len(sim.rental_market.units)
-    grid_size = int(np.ceil(np.sqrt(n_units)))
-    def get_positions(n):
-        grid = []
-        for i in range(n):
-            row, col = divmod(i, grid_size)
-            x = col
-            y = grid_size - row - 1
-            grid.append((x, y))
-        return grid
-    positions = get_positions(n_units)
     frames = []
-    for frame_idx, occ in enumerate(sim.occupancy_history):
+    movement_logs = []
+    for frame_idx in range(len(sim.metrics)):
         frame = []
-        for unit_idx, (unit_id, hh_id, hh_size) in enumerate(occ):
-            unit = sim.rental_market.units[unit_idx]
-            owner = getattr(unit, 'owner', None)
-            x, y = positions[unit_idx]
-            # Find tenant object if present
-            tenant = None
-            if hh_id is not None:
-                tenant = next((h for h in sim.households if h.id == hh_id), None)
+        logs = []
+        # Get movement logs for current frame
+        for household in sim.households:
+            if household.timeline:
+                # Get events from this month
+                current_month_events = [
+                    event for event in household.timeline 
+                    if event.year == sim.metrics[frame_idx]['year'] 
+                    and event.month == sim.metrics[frame_idx]['month']
+                    and event.record.get('type') == 'MOVED_IN'
+                ]
+                for event in current_month_events:
+                    move_info = (
+                        f"HH {household.id} moved to Unit {event.record['unit_id']}, "
+                        f"Life stage: {event.record['life_stage']}, "
+                        f"Satisfaction: {event.record['satisfaction']:.2f}, "
+                        f"Rent: ${event.record['rent']:.0f}"
+                    )
+                    logs.append(move_info)
+
+        for unit in sim.rental_market.units:
             frame.append({
-                'unit_id': unit_id,
-                'x': x,
-                'y': y,
-                'is_owner_occupied': unit.is_owner_occupied,
-                'occupied': unit.occupied,
+                'unit_id': unit.id,
                 'rent': unit.rent,
                 'quality': unit.quality,
+                'occupied': unit.occupied,
+                'is_owner_occupied': getattr(unit, 'is_owner_occupied', False),
                 'property_value': unit.base_rent * 12 * 20,
-                'tenant_id': hh_id,
-                'tenant_size': hh_size,
-                'owner_id': owner.id if owner else None,
-                # Add more stats:
-                'violations': getattr(unit, 'violations', 0),
-                'last_renovation': getattr(unit, 'last_renovation', 0),
-                # Tenant stats:
-                'tenant_income': tenant.income if tenant else None,
-                'tenant_wealth': tenant.wealth if tenant else None,
-                'tenant_satisfaction': tenant.satisfaction if tenant else None,
-                'tenant_life_stage': tenant.life_stage if tenant else None,
-                'tenant_rent_burden': tenant.current_rent_burden() if tenant else None,
-                # Owner stats:
-                'owner_income': owner.income if owner else None,
-                'owner_wealth': owner.wealth if owner else None,
-                'owner_mortgage': getattr(owner, 'mortgage_balance', None) if owner else None,
-                'owner_monthly_payment': getattr(owner, 'monthly_payment', None) if owner else None,
-                'owner_satisfaction': getattr(owner, 'satisfaction', None) if owner else None,
+                'tenant_size': unit.tenant.size if unit.tenant else 0,
+                'tenant_income': unit.tenant.income if unit.tenant else 0,
+                'tenant_wealth': unit.tenant.wealth if unit.tenant else 0,
+                'tenant_satisfaction': unit.tenant.satisfaction if unit.tenant else None,
+                'tenant_life_stage': unit.tenant.life_stage if unit.tenant else None,
+                'tenant_rent_burden': unit.tenant.current_rent_burden() if unit.tenant else 0,
+                'owner_income': unit.owner.income if getattr(unit, 'owner', None) else 0,
+                'owner_wealth': unit.owner.wealth if getattr(unit, 'owner', None) else 0,
+                'owner_mortgage': getattr(unit.owner, 'mortgage_balance', 0) if getattr(unit, 'owner', None) else 0,
+                'owner_monthly_payment': getattr(unit.owner, 'monthly_payment', 0) if getattr(unit, 'owner', None) else 0,
+                'owner_satisfaction': unit.owner.satisfaction if getattr(unit, 'owner', None) else 0,
             })
         frames.append(frame)
+        movement_logs.append(logs)
+
     with open(filename, 'wb') as f:
         pickle.dump(frames, f)
+    
+    # Save movement logs
+    movement_logs_filename = filename.replace('.pkl', '_movement_logs.pkl')
+    with open(movement_logs_filename, 'wb') as f:
+        pickle.dump(movement_logs, f)
 
