@@ -1,6 +1,7 @@
 # models/market.py
 import numpy as np
 from collections import defaultdict
+import random
 
 class RentalMarket:
     def __init__(self, units):
@@ -86,66 +87,24 @@ class RentalMarket:
         # Ensure demand stays within reasonable bounds
         self.market_conditions['market_demand'] = max(0.1, min(0.9, self.market_conditions['market_demand']))
 
-    def find_best_unit(self, max_rent, preference=None, size_preference=None, location_preference=None):
-        available = [u for u in self.units if not u.occupied and not getattr(u, 'is_owner_occupied', False) and u.rent <= max_rent]
-        if not available:
-            return None
-
-        # Calculate utility scores for each unit
-        utility_scores = []
-        for unit in available:
-            score = self._calculate_unit_utility(
-                unit, 
-                max_rent, 
-                preference, 
-                size_preference, 
-                location_preference
-            )
-            utility_scores.append((unit, score))
-
-        # Add some randomness to the selection process
-        if utility_scores:
-            scores = np.array([s[1] for s in utility_scores])
-            probs = np.exp(scores) / np.sum(np.exp(scores))  # Softmax
-            selected_idx = np.random.choice(len(utility_scores), p=probs)
-            return utility_scores[selected_idx][0]
-        return None
-
-    def _calculate_unit_utility(self, unit, max_rent, preference, size_preference, location_preference):
-        quality_score = unit.quality * (preference or 0.5)
-        price_score = (1 - unit.rent / max_rent) * (1 - (preference or 0.5))
-        
-        size_score = 0
-        if size_preference is not None:
-            size_diff = abs(unit.size - size_preference)
-            size_score = 1 - (size_diff / max(unit.size, size_preference))
-            size_score = size_score ** 2  # Square to give more weight to good matches
-
-        location_score = 0
-        if location_preference is not None:
-            location_diff = abs(unit.location - location_preference)
-            location_score = 1 - location_diff
-            location_score = location_score ** 2
-
-        amenity_score = unit.amenity_score ** 2
-
-        # Updated weights to reflect importance
-        weights = {
-            'quality': 0.25,
-            'price': 0.25,
-            'size': 0.2,
-            'location': 0.15,
-            'amenities': 0.15
-        }
-
-        utility = (
-            quality_score * weights['quality'] +
-            price_score * weights['price'] +
-            size_score * weights['size'] +
-            location_score * weights['location'] +
-            amenity_score * weights['amenities']
-        )
-        return utility
+    def find_best_unit(self, income, preference=0.5, size_preference=1, location_preference=0.5, only_vacant=True):
+        available_units = []
+        for unit in self.units:
+            # Skip owner-occupied units
+            if getattr(unit, 'is_owner_occupied', False):
+                continue
+                
+            # Skip occupied units if only looking for vacant ones
+            if only_vacant and unit.occupied:
+                continue
+                
+            # Basic affordability check
+            if unit.rent > 0.5 * income:
+                continue
+                
+            available_units.append(unit)
+            
+        return random.choice(available_units) if available_units else None
 
     def find_acceptable_unit(self, max_rent, min_quality=0.5, min_size=1):
         available = [

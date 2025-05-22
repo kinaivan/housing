@@ -52,11 +52,11 @@ class HousingVisualization:
         # Title
         self.ax.set_title("Housing Market Simulation", pad=20)
         self.ax.axis('off')
-        self.ax.set_xlim(-0.5, grid_size*self.spacing + 6)
+        self.ax.set_xlim(-0.5, grid_size*self.spacing + 8)  # Increased right limit
         self.ax.set_ylim(-0.5, grid_size*self.spacing)
 
         # Sidebar background
-        sidebar_x = grid_size*self.spacing + 0.5
+        sidebar_x = grid_size*self.spacing + 2.5  # Moved further right
         self.ax.add_patch(Rectangle(
             (sidebar_x, -0.5),
             5, grid_size*self.spacing + 0.5,
@@ -103,35 +103,62 @@ class HousingVisualization:
     def _update(self, frame):
         if self.paused:
             return
-        self.ax.cla()
-        self._setup_plot()
-        self.house_patches = []  # Reset for this frame
-        # Re-create tooltip for this frame
-        self.tooltip = self.ax.text(0, 0, "", visible=False,
-                                    ha='center', va='bottom',
-                                    fontsize=9,
-                                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.95),
-                                    zorder=200)
 
+        # Clear the plot
+        self.ax.clear()
+        self._setup_plot()  # Restore plot settings
+
+        # Get current metrics
         m = self.sim.metrics[frame]
-        occ = self.sim.occupancy_history[frame]
-        n_units = len(self.sim.rental_market.units)
 
-        for i in range(n_units):
-            unit = self.sim.rental_market.units[i]
-            x, y = self.house_positions[i]
+        # Draw grid
+        for i in range(self.grid_size + 1):
+            self.ax.axhline(y=i * self.spacing, color='gray', alpha=0.2)
+            self.ax.axvline(x=i * self.spacing, color='gray', alpha=0.2)
 
-            # draw house
-            self._draw_house(x, y, unit.rent, unit.occupied, i)
+        # Draw houses and households
+        self.house_patches = []  # Reset house patches for hover
+        for i, unit in enumerate(self.sim.rental_market.units):
+            row, col = divmod(i, self.grid_size)
+            x = col * self.spacing
+            y = (self.grid_size - row - 1) * self.spacing
 
-            # draw tiny stick figures
+            # Draw house (square)
+            color = (
+                'royalblue' if getattr(unit, 'is_owner_occupied', False)
+                else 'limegreen' if unit.occupied
+                else 'lightgray'
+            )
+            house = plt.Rectangle(
+                (x - 0.2, y - 0.2),
+                0.4, 0.4,
+                facecolor=color,
+                edgecolor='black'
+            )
+            self.ax.add_patch(house)
+            self.house_patches.append((house, i, x, y))
+
+            # Draw roof (triangle)
+            self.ax.add_patch(plt.Polygon(
+                [[x - 0.22, y + 0.2], [x, y + 0.4], [x + 0.22, y + 0.2]],
+                facecolor='#d95f02',
+                edgecolor='black'
+            ))
+
+            # Add house number
+            self.ax.text(x, y - 0.34, f"Unit {unit.id}", ha='center', va='center', fontsize=8)
+
+            # Draw household if occupied
             if unit.occupied:
-                _, hh_id, hh_size = occ[i]
-                for j in range(hh_size):
-                    px = x + (j - (hh_size - 1) / 2) * 0.15
+                size = unit.tenant.size if not getattr(unit, 'is_owner_occupied', False) else 1
+                for j in range(size):
+                    offset_x = (j - (size - 1) / 2) * 0.15
+                    px = x + offset_x
                     py = y - 0.05
+                    # Draw stick figure
                     head = Circle((px, py + 0.06), 0.04,
-                                  facecolor='#1b9e77', edgecolor='#222', lw=1, zorder=20)
+                                facecolor='#1b9e77' if not getattr(unit, 'is_owner_occupied', False) else '#3777c2',
+                                edgecolor='#222', lw=1, zorder=20)
                     body_line = PathPatch(
                         Path([(px, py + 0.02), (px, py - 0.02)], [Path.MOVETO, Path.LINETO]),
                         edgecolor='#222', lw=1.5, zorder=20
@@ -155,13 +182,62 @@ class HousingVisualization:
                     for part in (head, body_line, arm1, arm2, leg1, leg2):
                         self.ax.add_patch(part)
 
-            # rent label
-            self.ax.text(x, y - 0.34, f"${unit.rent:.0f}",
-                         ha='center', va='center', fontsize=8, zorder=30)
+        # Draw unhoused area on the right
+        waiting_area_x = self.grid_size * self.spacing + 0.5
+        self.ax.add_patch(plt.Rectangle(
+            (waiting_area_x, -0.5),
+            2, self.grid_size * self.spacing + 1,
+            facecolor=(1.0, 0.94, 0.94, 0.5),  # Light red with transparency
+            edgecolor='black',
+            alpha=0.3
+        ))
+        self.ax.text(
+            waiting_area_x + 1,
+            self.grid_size * self.spacing,
+            "Unhoused\nHouseholds",
+            ha='center',
+            va='top',
+            fontsize=12
+        )
+
+        # Draw unhoused households as stick figures
+        unhoused = [h for h in self.sim.households if not h.housed]
+        for i, household in enumerate(unhoused):
+            row = i // 2  # 2 households per row
+            col = i % 2
+            px = waiting_area_x + col * 0.5
+            py = self.grid_size * self.spacing - 1 - row * 0.5
+            # Draw stick figure
+            head = Circle((px, py + 0.06), 0.04,
+                        facecolor='#e41a1c',
+                        edgecolor='#222', lw=1, zorder=20)
+            body_line = PathPatch(
+                Path([(px, py + 0.02), (px, py - 0.02)], [Path.MOVETO, Path.LINETO]),
+                edgecolor='#222', lw=1.5, zorder=20
+            )
+            arm1 = PathPatch(
+                Path([(px, py), (px - 0.04, py - 0.04)], [Path.MOVETO, Path.LINETO]),
+                edgecolor='#222', lw=1.5, zorder=20
+            )
+            arm2 = PathPatch(
+                Path([(px, py), (px + 0.04, py - 0.04)], [Path.MOVETO, Path.LINETO]),
+                edgecolor='#222', lw=1.5, zorder=20
+            )
+            leg1 = PathPatch(
+                Path([(px, py - 0.02), (px - 0.03, py - 0.08)], [Path.MOVETO, Path.LINETO]),
+                edgecolor='#222', lw=1.5, zorder=20
+            )
+            leg2 = PathPatch(
+                Path([(px, py - 0.02), (px + 0.03, py - 0.08)], [Path.MOVETO, Path.LINETO]),
+                edgecolor='#222', lw=1.5, zorder=20
+            )
+            for part in (head, body_line, arm1, arm2, leg1, leg2):
+                self.ax.add_patch(part)
 
         # sidebar
-        stats_x = self.grid_size * self.spacing + 0.6
+        stats_x = self.grid_size * self.spacing + 2.5  # Moved further right
         stats_y = self.grid_size * self.spacing - 0.5
+
         # Owner-occupier metrics
         owner_units = [u for u in self.sim.rental_market.units if getattr(u, 'is_owner_occupied', False)]
         owner_share = len(owner_units) / len(self.sim.rental_market.units)
@@ -181,12 +257,25 @@ class HousingVisualization:
                     and event.record.get('type') == 'MOVED_IN'
                 ]
                 for event in current_month_events:
-                    move_info = (
-                        f"HH {household.id} moved to Unit {event.record['unit_id']}\n"
-                        f"Life stage: {event.record['life_stage']}\n"
-                        f"Satisfaction: {event.record['satisfaction']:.2f}\n"
-                        f"Rent: ${event.record['rent']:.0f}"
-                    )
+                    # Determine the most important reason
+                    move_reason = event.record.get('move_reason', 'Unknown')
+                    from_unit = event.record.get('from_unit_id')
+                    is_house_to_house = event.record.get('is_house_to_house', False)
+                    
+                    # Create move info with source unit if it's a house-to-house move
+                    if is_house_to_house:
+                        move_info = (
+                            f"HH {household.id} moved from Unit {from_unit} to Unit {event.record['unit_id']}\n"
+                            f"Reason: {move_reason}\n"
+                            f"New Rent: ${event.record['rent']:.0f}"
+                        )
+                    else:
+                        source = "Unhoused" if from_unit is None else f"Unit {from_unit}"
+                        move_info = (
+                            f"HH {household.id} moved from {source} to Unit {event.record['unit_id']}\n"
+                            f"Reason: {move_reason}\n"
+                            f"New Rent: ${event.record['rent']:.0f}"
+                        )
                     movement_logs.append(move_info)
 
         # Combine stats and movement logs
@@ -222,7 +311,21 @@ class HousingVisualization:
             zorder=100
         )
 
+        # Set up hover tooltip
+        self.tooltip = self.ax.text(0, 0, "", visible=False,
+                                  ha='center', va='bottom',
+                                  fontsize=9,
+                                  bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.95),
+                                  zorder=200)
+
+        # Update current frame
         self.current_frame = frame
+
+        # Update axis limits to accommodate the moved sidebar
+        self.ax.set_xlim(-0.5, self.grid_size * self.spacing + 8)  # Increased right limit
+
+        # Draw
+        self.fig.canvas.draw()
 
     def on_hover(self, event):
         if not event.inaxes:
@@ -326,19 +429,13 @@ class HousingVisualization:
         return cls(simulation, ax=ax)
 
 def show_housing_visualization(*simulations):
-    import matplotlib.pyplot as plt
-    from visualization.animated_sim import HousingVisualization
-
-    n = len(simulations)
-    fig, axes = plt.subplots(1, n, figsize=(18 * n, 12))
-    if n == 1:
-        axes = [axes]
     visualizations = []
-    for sim, ax in zip(simulations, axes):
+    for sim in simulations:
+        # Create a new figure for each simulation
+        fig, ax = plt.subplots(figsize=(18, 12))
         vis = HousingVisualization(sim, ax=ax)
-        vis.animate_on_existing_axis()
+        vis.animate()  # This will show each figure
         visualizations.append(vis)
-    plt.show()
     return visualizations
 
 def get_positions(n):
@@ -354,54 +451,78 @@ def get_positions(n):
 def export_frames(sim, filename):
     frames = []
     movement_logs = []
-    for frame_idx in range(len(sim.metrics)):
+
+    for frame_idx, metrics in enumerate(sim.metrics):
         frame = []
         logs = []
-        # Get movement logs for current frame
-        for household in sim.households:
-            if household.timeline:
-                # Get events from this month
-                current_month_events = [
-                    event for event in household.timeline 
-                    if event.year == sim.metrics[frame_idx]['year'] 
-                    and event.month == sim.metrics[frame_idx]['month']
-                    and event.record.get('type') == 'MOVED_IN'
-                ]
-                for event in current_month_events:
-                    move_info = (
-                        f"HH {household.id} moved to Unit {event.record['unit_id']}, "
-                        f"Life stage: {event.record['life_stage']}, "
-                        f"Satisfaction: {event.record['satisfaction']:.2f}, "
-                        f"Rent: ${event.record['rent']:.0f}"
-                    )
-                    logs.append(move_info)
+
+        # Build lookup from occupancy history for this frame
+        occupancy = {uid: (hh_id, hh_size) for uid, hh_id, hh_size in sim.occupancy_history[frame_idx]}
+
+        # Build lookup for households and their stats
+        hh_map = {hh.id: hh for hh in sim.households}
+
+        # Log movements this month
+        for hh in sim.households:
+            for event in hh.timeline:
+                if (event.year == metrics["year"] and event.month == metrics["month"]
+                    and event.record.get("type") == "MOVED_IN"):
+                    from_unit = event.record.get('from_unit_id')
+                    is_house_to_house = event.record.get('is_house_to_house', False)
+                    
+                    if is_house_to_house:
+                        logs.append(
+                            f"HH {hh.id} moved from Unit {from_unit} to Unit {event.record['unit_id']}, "
+                            f"Reason: {event.record['move_reason']}, "
+                            f"New Rent: ${event.record['rent']:.0f}"
+                        )
+                    else:
+                        source = "Unhoused" if from_unit is None else f"Unit {from_unit}"
+                        logs.append(
+                            f"HH {hh.id} moved from {source} to Unit {event.record['unit_id']}, "
+                            f"Reason: {event.record['move_reason']}, "
+                            f"New Rent: ${event.record['rent']:.0f}"
+                        )
 
         for unit in sim.rental_market.units:
+            unit_id = unit.id
+            is_owner_occupied = getattr(unit, 'is_owner_occupied', False)
+            occupied = unit_id in occupancy and occupancy[unit_id][0] is not None
+
+            # Get tenant if occupied
+            tenant_id, hh_size = occupancy.get(unit_id, (None, 0))
+            tenant = hh_map.get(tenant_id, None) if tenant_id is not None else None
+
+            # Get owner (if any)
+            owner = getattr(unit, 'owner', None)
+
             frame.append({
-                'unit_id': unit.id,
+                'unit_id': unit_id,
                 'rent': unit.rent,
                 'quality': unit.quality,
-                'occupied': unit.occupied,
-                'is_owner_occupied': getattr(unit, 'is_owner_occupied', False),
+                'occupied': occupied,
+                'is_owner_occupied': is_owner_occupied,
                 'property_value': unit.base_rent * 12 * 20,
-                'tenant_size': unit.tenant.size if unit.tenant else 0,
-                'tenant_income': unit.tenant.income if unit.tenant else 0,
-                'tenant_wealth': unit.tenant.wealth if unit.tenant else 0,
-                'tenant_satisfaction': unit.tenant.satisfaction if unit.tenant else None,
-                'tenant_life_stage': unit.tenant.life_stage if unit.tenant else None,
-                'tenant_rent_burden': unit.tenant.current_rent_burden() if unit.tenant else 0,
-                'owner_income': unit.owner.income if getattr(unit, 'owner', None) else 0,
-                'owner_wealth': unit.owner.wealth if getattr(unit, 'owner', None) else 0,
-                'owner_mortgage': getattr(unit.owner, 'mortgage_balance', 0) if getattr(unit, 'owner', None) else 0,
-                'owner_monthly_payment': getattr(unit.owner, 'monthly_payment', 0) if getattr(unit, 'owner', None) else 0,
-                'owner_satisfaction': unit.owner.satisfaction if getattr(unit, 'owner', None) else 0,
+                'tenant_size': tenant.size if tenant else 0,
+                'tenant_income': tenant.income if tenant else 0,
+                'tenant_wealth': tenant.wealth if tenant else 0,
+                'tenant_satisfaction': tenant.satisfaction if tenant else None,
+                'tenant_life_stage': tenant.life_stage if tenant else None,
+                'tenant_rent_burden': tenant.current_rent_burden() if tenant else 0,
+                'owner_income': owner.income if owner else 0,
+                'owner_wealth': owner.wealth if owner else 0,
+                'owner_mortgage': getattr(owner, 'mortgage_balance', 0) if owner else 0,
+                'owner_monthly_payment': getattr(owner, 'monthly_payment', 0) if owner else 0,
+                'owner_satisfaction': getattr(owner, 'satisfaction', 0) if owner else 0,
             })
+
         frames.append(frame)
         movement_logs.append(logs)
 
+    # Save frames
     with open(filename, 'wb') as f:
         pickle.dump(frames, f)
-    
+
     # Save movement logs
     movement_logs_filename = filename.replace('.pkl', '_movement_logs.pkl')
     with open(movement_logs_filename, 'wb') as f:

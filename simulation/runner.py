@@ -341,10 +341,22 @@ policy_nocap = RentCapPolicy(
 sim_nocap = Simulation(hh_nocap, ll_nocap, market_nocap, policy_nocap, years=2)
 sim_nocap.run()
 
-# 4. Now do your visualization (your code here)
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(36, 15))
-vis_cap = HousingVisualization(sim_cap, ax=ax1)
-vis_nocap = HousingVisualization(sim_nocap, ax=ax2)
-ani1 = vis_cap.animate_on_existing_axis()
-ani2 = vis_nocap.animate_on_existing_axis()
-plt.show()
+# # 4. Now do your visualization (your code here)
+# fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(36, 15))
+# vis_cap = HousingVisualization(sim_cap, ax=ax1)
+# vis_nocap = HousingVisualization(sim_nocap, ax=ax2)
+# ani1 = vis_cap.animate_on_existing_axis()
+# ani2 = vis_nocap.animate_on_existing_axis()
+# plt.show()
+
+
+# Visualization for Rent Cap scenario
+vis_cap = HousingVisualization.with_new_figure(sim_cap)
+ani_cap = vis_cap.animate_on_existing_axis()
+
+# Visualization for No Rent Cap scenario
+vis_nocap = HousingVisualization.with_new_figure(sim_nocap)
+ani_nocap = vis_nocap.animate_on_existing_axis()
+
+# Show both figures
+# plt.show()
