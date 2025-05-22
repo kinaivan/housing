@@ -10,7 +10,7 @@ from models.unit import RentalUnit, Landlord
 from models.market import RentalMarket
 from models.policy import RentCapPolicy
 from simulation.runner import Simulation
-from visualization.animated_sim import HousingVisualization
+from visualization.animated_sim import HousingVisualization, export_frames
 
 if __name__ == "__main__":
     # 1) Styling
@@ -170,11 +170,15 @@ if __name__ == "__main__":
     print("\nCreating visualizations...")
     
     # Create visualization for scenario with rent cap
-    print("\n1. With Rent Cap:")
-    vis_cap = HousingVisualization(sim_cap)
-    vis_cap.animate()
+    # print("\n1. With Rent Cap:")
+    # vis_cap = HousingVisualization(sim_cap)
+    # vis_cap.animate()
     
-    # Create visualization for scenario without rent cap
-    print("\n2. Without Rent Cap:")
-    vis_nocap = HousingVisualization(sim_nocap)
-    vis_nocap.animate()
+    # # Create visualization for scenario without rent cap
+    # print("\n2. Without Rent Cap:")
+    # vis_nocap = HousingVisualization(sim_nocap)
+    # vis_nocap.animate()
+
+    # 10) Export simulation frames for Dash app
+    export_frames(sim_cap, 'frames_cap.pkl')
+    export_frames(sim_nocap, 'frames_nocap.pkl')

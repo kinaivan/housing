@@ -5,6 +5,10 @@ from matplotlib.patches import Rectangle, Polygon, Circle, PathPatch
 from matplotlib.path import Path
 import random
 from matplotlib import cm
+import dash
+from dash import dcc, html, Input, Output
+import plotly.graph_objs as go
+import pickle
 
 class HousingVisualization:
     def __init__(self, simulation, ax=None):
@@ -297,3 +301,87 @@ class HousingVisualization:
     def with_new_figure(cls, simulation, figsize=(18, 12)):
         fig, ax = plt.subplots(figsize=figsize)
         return cls(simulation, ax=ax)
+
+def show_housing_visualization(*simulations):
+    import matplotlib.pyplot as plt
+    from visualization.animated_sim import HousingVisualization
+
+    n = len(simulations)
+    fig, axes = plt.subplots(1, n, figsize=(18 * n, 12))
+    if n == 1:
+        axes = [axes]
+    visualizations = []
+    for sim, ax in zip(simulations, axes):
+        vis = HousingVisualization(sim, ax=ax)
+        vis.animate_on_existing_axis()
+        visualizations.append(vis)
+    plt.show()
+    return visualizations
+
+def get_positions(n):
+    grid_size = int(np.ceil(np.sqrt(n)))
+    grid = []
+    for i in range(n):
+        row, col = divmod(i, grid_size)
+        x = col
+        y = grid_size - row - 1
+        grid.append((x, y))
+    return grid
+
+def export_frames(sim, filename):
+    import pickle
+    import numpy as np
+    n_units = len(sim.rental_market.units)
+    grid_size = int(np.ceil(np.sqrt(n_units)))
+    def get_positions(n):
+        grid = []
+        for i in range(n):
+            row, col = divmod(i, grid_size)
+            x = col
+            y = grid_size - row - 1
+            grid.append((x, y))
+        return grid
+    positions = get_positions(n_units)
+    frames = []
+    for frame_idx, occ in enumerate(sim.occupancy_history):
+        frame = []
+        for unit_idx, (unit_id, hh_id, hh_size) in enumerate(occ):
+            unit = sim.rental_market.units[unit_idx]
+            owner = getattr(unit, 'owner', None)
+            x, y = positions[unit_idx]
+            # Find tenant object if present
+            tenant = None
+            if hh_id is not None:
+                tenant = next((h for h in sim.households if h.id == hh_id), None)
+            frame.append({
+                'unit_id': unit_id,
+                'x': x,
+                'y': y,
+                'is_owner_occupied': unit.is_owner_occupied,
+                'occupied': unit.occupied,
+                'rent': unit.rent,
+                'quality': unit.quality,
+                'property_value': unit.base_rent * 12 * 20,
+                'tenant_id': hh_id,
+                'tenant_size': hh_size,
+                'owner_id': owner.id if owner else None,
+                # Add more stats:
+                'violations': getattr(unit, 'violations', 0),
+                'last_renovation': getattr(unit, 'last_renovation', 0),
+                # Tenant stats:
+                'tenant_income': tenant.income if tenant else None,
+                'tenant_wealth': tenant.wealth if tenant else None,
+                'tenant_satisfaction': tenant.satisfaction if tenant else None,
+                'tenant_life_stage': tenant.life_stage if tenant else None,
+                'tenant_rent_burden': tenant.current_rent_burden() if tenant else None,
+                # Owner stats:
+                'owner_income': owner.income if owner else None,
+                'owner_wealth': owner.wealth if owner else None,
+                'owner_mortgage': getattr(owner, 'mortgage_balance', None) if owner else None,
+                'owner_monthly_payment': getattr(owner, 'monthly_payment', None) if owner else None,
+                'owner_satisfaction': getattr(owner, 'satisfaction', None) if owner else None,
+            })
+        frames.append(frame)
+    with open(filename, 'wb') as f:
+        pickle.dump(frames, f)
+
