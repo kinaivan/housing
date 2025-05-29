@@ -5,20 +5,22 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-from models.household import Household
+from models.household import Household, Contract
 from models.unit import RentalUnit, Landlord
 from models.market import RentalMarket
 from models.policy import RentCapPolicy
 from simulation.runner import Simulation
-from visualization.animated_sim import HousingVisualization, export_frames
+from visualization.animated_sim import export_frames
 
 if __name__ == "__main__":
     # 1) Styling
     plt.style.use('seaborn-v0_8')
     sns.set_theme()
 
-    # 2) Build a small "prototype" population & housing stock
+    # 2) Build initial population & housing stock
     random.seed(123)
+    
+    # Create exactly 100 households
     base_households = []
     for i in range(100):
         age = max(18, min(85, random.normalvariate(45, 15)))
@@ -31,15 +33,64 @@ if __name__ == "__main__":
             Household(id=i, age=age, size=size, income=income, wealth=wealth)
         )
 
+    # Create exactly 100 rental units (no owner-occupied units)
     base_units = []
     for i in range(100):
-        quality   = random.uniform(0.3,0.9)
+        quality = random.uniform(0.3,0.9)
         base_rent = random.randint(500,1500)
         base_units.append(
             RentalUnit(id=i, quality=quality, base_rent=base_rent)
         )
 
-    # 3) Helper to build landlords out of a units list
+    # Set up initial occupancy: 91 occupied units, 9 empty, 92 housed households, 8 unhoused
+    occupied_units = random.sample(base_units, 91)
+    empty_units = [u for u in base_units if u not in occupied_units]
+    
+    # House 92 households in 91 units (1 unit will have 2 households sharing)
+    housed_households = random.sample(base_households, 92)
+    unhoused_households = [h for h in base_households if h not in housed_households]
+    
+    # Assign households to units
+    households_assigned = 0
+    shared_unit_assigned = False
+    
+    for i, unit in enumerate(occupied_units):
+        if households_assigned < len(housed_households):
+            # Assign first household
+            hh1 = housed_households[households_assigned]
+            unit.assign(hh1)
+            hh1.contract = Contract(hh1, unit)
+            hh1.housed = True
+            hh1.calculate_satisfaction()
+            households_assigned += 1
+            
+            # For one random unit, add a second household (sharing)
+            if (not shared_unit_assigned and 
+                households_assigned < len(housed_households) and 
+                random.random() < 0.5):  # 50% chance this will be the sharing unit
+                hh2 = housed_households[households_assigned]
+                unit.add_tenant(hh2)
+                hh2.contract = Contract(hh2, unit)
+                hh2.housed = True
+                hh2.calculate_satisfaction()
+                households_assigned += 1
+                shared_unit_assigned = True
+    
+    # Verify we have the right numbers
+    total_housed = sum(1 for h in base_households if h.housed)
+    total_unhoused = len([h for h in base_households if not h.housed])
+    total_occupied = len([u for u in base_units if u.occupied])
+    total_empty = len([u for u in base_units if not u.occupied])
+    
+    print(f"Initial setup verification:")
+    print(f"  Housed households: {total_housed}")
+    print(f"  Unhoused households: {total_unhoused}")
+    print(f"  Occupied units: {total_occupied}")
+    print(f"  Empty units: {total_empty}")
+    print(f"  Total households: {len(base_households)}")
+    print(f"  Total units: {len(base_units)}")
+
+    # Create landlords for all units (all are rental now)
     def make_landlords(units, compliant_rate=0.7):
         L = []
         n_landlords = len(units)//10
@@ -58,53 +109,49 @@ if __name__ == "__main__":
     hh_cap = copy.deepcopy(base_households)
     u_cap  = copy.deepcopy(base_units)
     ll_cap = make_landlords(u_cap)
-
     market_cap = RentalMarket(u_cap)
     policy_cap = RentCapPolicy(
         rent_cap_ratio=0.3,
         max_increase_rate=0.05,
         inspection_rate=0.1
     )
-
-    sim_cap = Simulation(hh_cap, ll_cap, market_cap, policy_cap, years=2)
+    sim_cap = Simulation(hh_cap, ll_cap, market_cap, policy_cap, years=10)
     sim_cap.run()
 
     # 5) Scenario B: No Rent Cap
     hh_nocap = copy.deepcopy(base_households)
     u_nocap  = copy.deepcopy(base_units)
     ll_nocap = make_landlords(u_nocap)
-
     market_nocap = RentalMarket(u_nocap)
     policy_nocap = RentCapPolicy(
         rent_cap_ratio=1.0,    # effectively unlimited
         max_increase_rate=0.2,
         inspection_rate=0.0
     )
-
-    sim_nocap = Simulation(hh_nocap, ll_nocap, market_nocap, policy_nocap, years=2)
+    sim_nocap = Simulation(hh_nocap, ll_nocap, market_nocap, policy_nocap, years=10)
     sim_nocap.run()
 
     # 6) Extract time-series & final stock stats
-    months            = [f"{m['year']}-{m['month']:02}" for m in sim_cap.metrics]
-    sat_cap          = [m['satisfaction'] for m in sim_cap.metrics]
-    sat_nocap        = [m['satisfaction'] for m in sim_nocap.metrics]
-    vac_cap          = [m['vacancy_rate'] for m in sim_cap.metrics]
-    vac_nocap        = [m['vacancy_rate'] for m in sim_nocap.metrics]
-    rents_cap        = [u.rent for u in u_cap]
-    rents_nocap      = [u.rent for u in u_nocap]
+    periods = [f"Year {m['year']}, Period {m['period']}" for m in sim_cap.metrics]
+    sat_cap = [m['satisfaction'] for m in sim_cap.metrics]
+    sat_nocap = [m['satisfaction'] for m in sim_nocap.metrics]
+    vac_cap = [m['vacancy_rate'] for m in sim_cap.metrics]
+    vac_nocap = [m['vacancy_rate'] for m in sim_nocap.metrics]
+    rents_cap = [u.rent for u in u_cap]
+    rents_nocap = [u.rent for u in u_nocap]
 
-    # 7) Make a 3×2 panel
+    # 7) Make a 3×2 panel with adjusted x-axis for longer timeline
     fig, axs = plt.subplots(3,2,figsize=(16,12))
-    fig.suptitle("Housing Market: Rent-Cap vs No-Cap", fontsize=16)
+    fig.suptitle("Housing Market: Rent-Cap vs No-Cap (10 Year Simulation)", fontsize=16)
 
     # (1) Satisfaction
     ax = axs[0,0]
-    ax.plot(months, sat_cap,   label="With Cap", lw=2)
-    ax.plot(months, sat_nocap, label="No Cap",   lw=2)
+    ax.plot(periods, sat_cap,   label="With Cap", lw=2)
+    ax.plot(periods, sat_nocap, label="No Cap",   lw=2)
     ax.set_title("Tenant Satisfaction")
     ax.set_ylabel("Satisfaction")
-    ax.set_xticks(months[::3])
-    ax.set_xticklabels(months[::3], rotation=45)
+    ax.set_xticks(periods[::4])  # Show every 2 years
+    ax.set_xticklabels(periods[::4], rotation=45)
     ax.legend(); ax.grid(alpha=0.3)
 
     # (2) Rent distribution
@@ -115,12 +162,12 @@ if __name__ == "__main__":
 
     # (3) Vacancy over time
     ax = axs[1,0]
-    ax.plot(months, vac_cap,   label="With Cap", lw=2)
-    ax.plot(months, vac_nocap, label="No Cap",   lw=2)
+    ax.plot(periods, vac_cap,   label="With Cap", lw=2)
+    ax.plot(periods, vac_nocap, label="No Cap",   lw=2)
     ax.set_title("Vacancy Rate")
     ax.set_ylabel("Vacancy")
-    ax.set_xticks(months[::3])
-    ax.set_xticklabels(months[::3], rotation=45)
+    ax.set_xticks(periods[::4])  # Show every 2 years
+    ax.set_xticklabels(periods[::4], rotation=45)
     ax.legend(); ax.grid(alpha=0.3)
 
     # (4) Market stats (scaled)
@@ -156,7 +203,7 @@ if __name__ == "__main__":
     axs[2,1].axis('off')
 
     plt.tight_layout(rect=[0,0.03,1,0.95])
-    plt.show()
+    # plt.show()  # Skip showing matplotlib plots, we only need the frame exports
 
     # 8) Print a neat summary
     print("\nSummary Statistics:")
@@ -166,19 +213,6 @@ if __name__ == "__main__":
     print(f"Final Profit     → Cap: {sim_cap.metrics[-1]['profit']:.0f}   NoCap: {sim_nocap.metrics[-1]['profit']:.0f}")
     print(f"Total Violations → Cap: {sim_cap.metrics[-1]['violations']}   NoCap: {sim_nocap.metrics[-1]['violations']}")
 
-    # 9) Create animated visualizations
-    print("\nCreating visualizations...")
-    
-    # Create visualization for scenario with rent cap
-    # print("\n1. With Rent Cap:")
-    # vis_cap = HousingVisualization(sim_cap)
-    # vis_cap.animate()
-    
-    # # Create visualization for scenario without rent cap
-    # print("\n2. Without Rent Cap:")
-    # vis_nocap = HousingVisualization(sim_nocap)
-    # vis_nocap.animate()
-
-    # 10) Export simulation frames for Dash app
+    # Export simulation frames for Dash app
     export_frames(sim_cap, 'frames_cap.pkl')
     export_frames(sim_nocap, 'frames_nocap.pkl')

@@ -39,11 +39,28 @@ class RentalMarket:
         }
 
     def update_market_conditions(self):
+        # Update basic metrics
         self.market_conditions.update({
             'average_rent': self._calculate_average_rent(),
             'vacancy_rate': self._calculate_vacancy_rate(),
             'location_premiums': self._calculate_location_premiums()
         })
+
+        # Adjust rents for vacant units
+        for unit in self.units:
+            if not unit.occupied and not getattr(unit, 'is_owner_occupied', False):
+                vacancy_duration = getattr(unit, 'vacancy_duration', 0)
+                # More aggressive price drops based on vacancy duration
+                if vacancy_duration > 0:
+                    # Drop rent by 5-15% per period based on duration
+                    reduction = min(0.15, 0.05 * (vacancy_duration / 2))  # Cap at 15% reduction
+                    unit.rent = unit.rent * (1 - reduction)
+                    # Reset rent if it gets too low
+                    if unit.rent < unit.base_rent * 0.6:
+                        unit.rent = unit.base_rent * 0.6
+                unit.vacancy_duration += 1
+            else:
+                unit.vacancy_duration = 0
 
         # Update price index
         if self.historical_data['rents']:
@@ -65,18 +82,21 @@ class RentalMarket:
         price_factor = 1 - (self.market_conditions['price_index'] / 100 - 1)
         economic_factor = 1.0  # Could be updated based on external economic conditions
         
-        # Add seasonal factor
-        current_month = len(self.historical_data['rents']) % 12
-        seasonal_factor = 1 + 0.1 * np.sin(2 * np.pi * current_month / 12)  # Seasonal variation
+        # Add seasonal factor (now for 6-month periods)
+        current_period = len(self.historical_data['rents']) % 2
+        seasonal_factor = 1 + 0.1 * np.sin(np.pi * current_period)  # Seasonal variation
         
         # Add trend factor based on historical data
         trend_factor = 1.0
-        if len(self.historical_data['rents']) > 12:
-            recent_trend = np.mean(self.historical_data['rents'][-12:]) / np.mean(self.historical_data['rents'][-24:-12])
+        if len(self.historical_data['rents']) > 2:
+            recent_trend = np.mean(self.historical_data['rents'][-2:]) / np.mean(self.historical_data['rents'][-4:-2])
             trend_factor = 1 + (recent_trend - 1) * 0.5  # Dampen the trend effect
         
+        # More dynamic market demand based on conditions
+        base_demand = 0.5 + (0.2 if self.market_conditions['vacancy_rate'] > 0.1 else -0.1)
+        
         self.market_conditions['market_demand'] = (
-            self.market_conditions['base_demand'] * 
+            base_demand * 
             vacancy_factor * 
             price_factor * 
             economic_factor *
@@ -84,8 +104,8 @@ class RentalMarket:
             trend_factor
         )
         
-        # Ensure demand stays within reasonable bounds
-        self.market_conditions['market_demand'] = max(0.1, min(0.9, self.market_conditions['market_demand']))
+        # Ensure demand stays within reasonable bounds but allow for more variation
+        self.market_conditions['market_demand'] = max(0.2, min(0.95, self.market_conditions['market_demand']))
 
     def find_best_unit(self, income, preference=0.5, size_preference=1, location_preference=0.5, only_vacant=True):
         available_units = []

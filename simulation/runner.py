@@ -5,7 +5,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from visualization.animated_sim import HousingVisualization
 import copy
-from models.household import Household
+from models.household import Household, Contract
 from models.unit import RentalUnit, Landlord
 from models.market import RentalMarket
 from models.policy import RentCapPolicy
@@ -23,6 +23,7 @@ class Simulation:
         self.wealth_tax_threshold = 50000
         self.total_property_tax_paid = 0
         self.total_wealth_tax_paid = 0
+        self.next_household_id = max(h.id for h in households) + 1 if households else 0
         
         # Initialize detailed metrics tracking
         self.detailed_metrics = {
@@ -33,122 +34,258 @@ class Simulation:
             'renovation_events': [],
             'market_conditions': []
         }
-        self.occupancy_history = []  # NEW: list of lists of (unit_id, household_id, household_size)
+        self.occupancy_history = []
 
-    def step(self, year, month):
+    def _create_new_household(self):
+        # Create a new household with random characteristics
+        age = max(18, min(85, random.normalvariate(45, 15)))
+        if age < 30:
+            size = random.randint(1,2)
+        elif age < 45:
+            size = random.randint(2,4)
+        else:
+            size = random.randint(1,3)
+        income = random.randint(1000,3000)
+        wealth = random.randint(0,10000)
+        
+        new_household = Household(
+            id=self.next_household_id,
+            age=age,
+            size=size,
+            income=income,
+            wealth=wealth
+        )
+        self.next_household_id += 1
+        return new_household
+
+    def _process_population_changes(self, year, period):
+        # Track actions for this step
+        actions_this_step = 0
+        
+        # Process household departures and lifecycle events
+        households_to_remove = []
+        new_households = []
+
+        # 1. Household departures (leaving the neighborhood) - increased rate
+        for household in self.households:
+            if household not in households_to_remove:
+                # Increased departure rates for dynamic behavior
+                leave_chance = 0.05  # Base 5% chance per period (increased from 0.1%)
+                
+                # Increase chance if household is struggling
+                if household.current_rent_burden() > 0.5:
+                    leave_chance += 0.1  # Strong incentive to leave if struggling
+                if not household.housed:
+                    leave_chance += 0.15  # Very high chance for unhoused to leave
+                if household.satisfaction < 0.3:
+                    leave_chance += 0.08
+                
+                # Age-based factors
+                if household.age > 75:
+                    leave_chance += 0.1  # Retirement/moving away
+                
+                if random.random() < leave_chance:
+                    # If leaving, properly handle their current housing
+                    if household.housed:
+                        if household.contract and household.contract.unit:
+                            household.contract.unit.remove_tenant(household)
+                    households_to_remove.append(household)
+                    actions_this_step += 1
+
+        # 2. Household breakups (more common now) - people splitting up
+        for household in self.households:
+            if household not in households_to_remove and household.size > 1:
+                breakup_chance = 0.08  # Base 8% chance per period (much higher)
+                
+                # Increased chance based on various factors
+                if household.satisfaction < 0.4:
+                    breakup_chance += 0.1
+                if household.current_rent_burden() > 0.5:
+                    breakup_chance += 0.12
+                if household.size > 3:  # Large households more likely to split
+                    breakup_chance += 0.05
+                
+                if random.random() < breakup_chance:
+                    # Split into two households
+                    new_size = max(1, household.size // 2)
+                    if new_size > 0:
+                        new_hh = self._create_new_household()
+                        new_hh.size = new_size
+                        new_hh.wealth = household.wealth * 0.4  # Split wealth
+                        new_hh.income = household.income * 0.6  # New household gets lower income initially
+                        household.size -= new_size
+                        household.wealth *= 0.6
+                        new_households.append(new_hh)
+                        actions_this_step += 1
+                        
+                        # Record breakup event
+                        if household.contract and household.contract.unit:
+                            household.record_breakup_event(new_hh, year, period)
+                        
+                        # Handle housing situation - new household becomes unhoused initially
+                        new_hh.housed = False
+                        new_hh.contract = None
+
+        # 3. Household mergers/sharing (people moving in together) - increased rate
+        unhoused_households = [h for h in self.households if not h.housed and h not in households_to_remove]
+        housed_households = [h for h in self.households if h.housed and h not in households_to_remove]
+        
+        # Try to get unhoused households to share with housed ones
+        for unhoused_hh in unhoused_households[:3]:  # Limit to prevent too many actions
+            for housed_hh in housed_households:
+                if (housed_hh.contract and housed_hh.contract.unit and 
+                    len(housed_hh.contract.unit.tenants) < 2 and  # Max 2 households per unit
+                    abs(housed_hh.age - unhoused_hh.age) < 15 and
+                    random.random() < 0.15):  # 15% chance of sharing
+                    
+                    # Move unhoused household to share the unit
+                    unit = housed_hh.contract.unit
+                    unit.add_tenant(unhoused_hh)
+                    unhoused_hh.contract = Contract(unhoused_hh, unit)
+                    unhoused_hh.housed = True
+                    unhoused_hh.calculate_satisfaction()
+                    actions_this_step += 1
+                    
+                    # Record merger event
+                    housed_hh.record_merger_event(unhoused_hh, year, period)
+                    break
+
+        # 4. New household arrivals (people moving into the neighborhood) - much higher rate
+        current_population = len(self.households) - len(households_to_remove) + len(new_households)
+        target_population = 100  # Try to maintain around 100 households
+        
+        # High arrival rate to maintain population and create activity
+        arrival_rate = 0.15  # 15% chance per step (much higher)
+        
+        # Add more households if below target
+        while current_population < target_population and random.random() < arrival_rate:
+            new_household = self._create_new_household()
+            new_household.housed = False  # Start as unhoused
+            new_households.append(new_household)
+            actions_this_step += 1
+            current_population += 1
+
+        # Remove departing households
+        for household in households_to_remove:
+            if household in self.households:
+                self.households.remove(household)
+
+        # Add new households from lifecycle events and arrivals
+        self.households.extend(new_households)
+        
+        return actions_this_step
+
+    def step(self, year, period):
+        # Track total actions for this step
+        total_actions = 0
+        
+        # Process population changes first (returns action count)
+        population_actions = self._process_population_changes(year, period)
+        total_actions += population_actions
+        
         # Update market conditions
         self.rental_market.update_market_conditions()
         market_conditions = self.rental_market.market_conditions
 
-        # Update households
+        # Update households and track movement actions
+        movement_actions = 0
         for household in self.households:
-            household.update_month(year, month)
-            household.consider_moving(self.rental_market, self.policy, year, month)
+            # Update household for this period
+            household.update_month(year, period)
+            
+            # Track if household was housed before considering moving
+            was_housed = household.housed
+            current_unit = household.contract.unit if household.contract else None
+            
+            # Check for potential eviction due to high rent burden
+            if (household.housed and 
+                household.contract is not None):
+                
+                rent_burden = household.current_rent_burden()
+                # Gradual eviction risk based on rent burden
+                if rent_burden > 0.6:  # Start risk at 60% burden (increased threshold)
+                    eviction_risk = (rent_burden - 0.6) * 3  # More aggressive eviction
+                    if random.random() < eviction_risk:
+                        household.contract.unit.remove_tenant(household)
+                        household.contract = None
+                        household.housed = False
+                        household.satisfaction = 0
+                        household.add_event({
+                            "type": "EVICTED",
+                            "reason": "High rent burden",
+                            "rent_burden": rent_burden
+                        }, year, period)
+                        total_actions += 1
+            
+            # Consider moving for all households
+            household.consider_moving(self.rental_market, self.policy, year, period)
+            
+            # Check if household moved
+            if household.housed != was_housed or (household.contract and household.contract.unit != current_unit):
+                movement_actions += 1
 
-            # Force eviction if rent burden is too high (only for renters with a contract)
-            if (
-                household.housed
-                and not getattr(household, 'is_owner_occupier', False)
-                and household.contract is not None
-                and household.current_rent_burden() > 0.6
-            ):
-                household.contract.unit.vacate()
-                household.contract = None
-                household.housed = False
-                household.satisfaction = 0
+        total_actions += movement_actions
 
         # Update landlords and their units
         for landlord in self.landlords:
             landlord.update(market_conditions)
             landlord.update_rents(self.policy, market_conditions)
 
-        # Government inspects units
+        # Government inspects units (twice per period)
         for landlord in self.landlords:
             for unit in landlord.units:
-                if unit.occupied and random.random() < self.policy.inspection_rate:
+                if unit.occupied and random.random() < self.policy.inspection_rate * 2:
                     self.policy.inspect(unit)
 
-        # Landlords collect rent
+        # Landlords collect rent (6 months worth)
         for landlord in self.landlords:
-            landlord.collect_rent()
+            landlord.collect_rent(periods=6)
 
-        # Property tax (monthly, pro-rated)
-        property_tax_this_month = 0
+        # Property tax (6 months, pro-rated)
+        property_tax_this_period = 0
         for landlord in self.landlords:
             for unit in landlord.units:
                 property_value = unit.base_rent * 12 * 20  # proxy for property value
-                tax = (self.property_tax_rate / 12) * property_value
+                tax = (self.property_tax_rate / 2) * property_value  # Half-year tax
                 landlord.total_profit -= tax
-                property_tax_this_month += tax
-        self.total_property_tax_paid += property_tax_this_month
+                property_tax_this_period += tax
+        self.total_property_tax_paid += property_tax_this_period
 
         # Wealth tax (annually, at end of year)
-        wealth_tax_this_month = 0
-        if month == 12:
+        wealth_tax_this_period = 0
+        if period == 2:  # End of year (second period)
             for household in self.households:
                 taxable_wealth = max(0, household.wealth - self.wealth_tax_threshold)
                 tax = self.wealth_tax_rate * taxable_wealth  # full year
                 household.wealth -= tax
-                wealth_tax_this_month += tax
-        self.total_wealth_tax_paid += wealth_tax_this_month
-
-        # Ownership transitions (owner-occupiers may sell, renters may buy)
-        # 1. Owner-occupiers: If satisfaction < 0.5 (was 0.3), or with 10% random chance, sell and become renter
-        for household in self.households:
-            if getattr(household, 'is_owner_occupier', False) and (
-                household.satisfaction < 0.5 or random.random() < 0.1):
-                unit = getattr(household, 'owned_unit', None)
-                if unit is not None:
-                    # Sell house: add property value to wealth, clear mortgage
-                    property_value = unit.base_rent * 12 * 20
-                    equity = max(0, property_value - getattr(household, 'mortgage_balance', 0))
-                    household.wealth += equity
-                    household.mortgage_balance = 0
-                    household.monthly_payment = 0
-                    household.is_owner_occupier = False
-                    household.owned_unit = None
-                    unit.remove_owner()
-                    household.housed = False
-                    household.contract = None
-                    # Assign the now-vacant unit to a random landlord
-                    if self.landlords:
-                        random.choice(self.landlords).add_unit(unit)
-        # 2. Renters: If wealth > 20000 (was 40000), or with 10% random chance, may buy a vacant unit
-        for household in self.households:
-            if not getattr(household, 'is_owner_occupier', False) and household.housed and (
-                household.wealth > 20000 or random.random() < 0.1):
-                # Find a vacant, non-owner-occupied unit
-                vacant_units = [u for u in self.rental_market.units if not u.occupied and not getattr(u, 'is_owner_occupied', False)]
-                if vacant_units:
-                    unit = random.choice(vacant_units)
-                    # Buy house: pay 20% down, get mortgage for 80%
-                    property_value = unit.base_rent * 12 * 20
-                    down_payment = 0.2 * property_value
-                    if household.wealth >= down_payment:
-                        household.buy_home(unit)
+                wealth_tax_this_period += tax
+        self.total_wealth_tax_paid += wealth_tax_this_period
 
         # Lower the wealth tax threshold for demonstration
         self.wealth_tax_threshold = 10000
 
-        # Record metrics
-        self._record_detailed_metrics(year, month)
-        self._record_basic_metrics(year, month)
+        # Record metrics including action count
+        self._record_detailed_metrics(year, period)
+        self._record_basic_metrics(year, period, total_actions)
 
-        # NEW: Record occupancy for this step
+        # Record occupancy for this step
         step_occupancy = []
         for unit in self.rental_market.units:
-            if unit.occupied and unit.tenant:
-                step_occupancy.append((unit.id, unit.tenant.id, unit.tenant.size))
+            if unit.occupied and unit.tenants:
+                # Record all tenants in the unit
+                for tenant in unit.tenants:
+                    step_occupancy.append((unit.id, tenant.id, tenant.size))
             else:
+                # Vacant unit
                 step_occupancy.append((unit.id, None, 0))
         self.occupancy_history.append(step_occupancy)
 
-    def _record_detailed_metrics(self, year, month):
+    def _record_detailed_metrics(self, year, period):
         # Record life stage distribution
         life_stages = defaultdict(int)
         for h in self.households:
             life_stages[h.life_stage] += 1
-        self.detailed_metrics['life_stage_distribution'][f"{year}-{month:02}"] = dict(life_stages)
+        self.detailed_metrics['life_stage_distribution'][f"{year}-{period}"] = dict(life_stages)
 
         # Record income distribution
         income_bins = [0, 1000, 2000, 3000, 4000, float('inf')]
@@ -158,7 +295,7 @@ class Simulation:
                 if income_bins[i] <= h.income < income_bins[i+1]:
                     income_dist[f"{income_bins[i]}-{income_bins[i+1]}"] += 1
                     break
-        self.detailed_metrics['income_distribution'][f"{year}-{month:02}"] = dict(income_dist)
+        self.detailed_metrics['income_distribution'][f"{year}-{period}"] = dict(income_dist)
 
         # Record wealth distribution
         wealth_bins = [0, 5000, 10000, 20000, 50000, float('inf')]
@@ -168,16 +305,16 @@ class Simulation:
                 if wealth_bins[i] <= h.wealth < wealth_bins[i+1]:
                     wealth_dist[f"{wealth_bins[i]}-{wealth_bins[i+1]}"] += 1
                     break
-        self.detailed_metrics['wealth_distribution'][f"{year}-{month:02}"] = dict(wealth_dist)
+        self.detailed_metrics['wealth_distribution'][f"{year}-{period}"] = dict(wealth_dist)
 
         # Record market conditions
         self.detailed_metrics['market_conditions'].append({
             'year': year,
-            'month': month,
+            'period': period,
             'conditions': self.rental_market.market_conditions.copy()
         })
 
-    def _record_basic_metrics(self, year, month):
+    def _record_basic_metrics(self, year, period, total_actions):
         # Calculate basic metrics
         housed = sum(h.housed for h in self.households)
         avg_burden = sum(h.current_rent_burden() or 0 for h in self.households if h.housed) / housed if housed else 0
@@ -199,7 +336,7 @@ class Simulation:
 
         self.metrics.append({
             "year": year,
-            "month": month,
+            "period": period,
             "housed": housed,
             "avg_burden": avg_burden,
             "satisfaction": avg_satisfaction,
@@ -213,18 +350,19 @@ class Simulation:
             "mobility_rate": mobility_rate,
             "renovation_count": renovation_count,
             "property_tax": self.total_property_tax_paid,
-            "wealth_tax": self.total_wealth_tax_paid
+            "wealth_tax": self.total_wealth_tax_paid,
+            "total_actions": total_actions
         })
 
     def run(self):
         for year in range(1, self.years + 1):
-            for month in range(1, 13):
-                self.step(year, month)
+            for period in range(1, 3):  # Two 6-month periods per year
+                self.step(year, period)
 
     def report(self):
         print("\nBasic Metrics:")
         for m in self.metrics:
-            print(f"{m['year']:>4}-{m['month']:>02} | "
+            print(f"{m['year']:>4}-{m['period']:>02} | "
                   f"Housed: {m['housed']:>3} | "
                   f"Burden: {m['avg_burden']:.2f} | "
                   f"Satisfaction: {m['satisfaction']:.2f} | "
@@ -241,7 +379,7 @@ class Simulation:
         print(f"Total Renovations: {final_metrics['renovation_count']}")
 
         print("\nFinal Life Stage Distribution:")
-        life_stages = self.detailed_metrics['life_stage_distribution'][f"{self.years}-12"]
+        life_stages = self.detailed_metrics['life_stage_distribution'][f"{self.years}-2"]
         for stage, count in life_stages.items():
             print(f"{stage}: {count} households")
 
@@ -250,113 +388,3 @@ class Simulation:
 
     def get_market_trends(self):
         return self.rental_market.get_historical_trends()
-
-random.seed(123)
-base_households = []
-base_units = []
-num_households = 100
-num_owner_occupiers = int(0.3 * num_households)
-owner_indices = random.sample(range(num_households), num_owner_occupiers)
-
-for i in range(num_households):
-    age = max(18, min(85, random.normalvariate(45, 15)))
-    if age < 30:       size = random.randint(1,2)
-    elif age < 45:     size = random.randint(2,4)
-    else:              size = random.randint(1,3)
-    income = random.randint(1000,3000)
-    wealth = random.randint(0,10000)
-    is_owner_occupier = i in owner_indices
-    base_households.append(
-        Household(id=i, age=age, size=size, income=income, wealth=wealth, is_owner_occupier=is_owner_occupier)
-    )
-
-for i in range(num_households):
-    quality   = random.uniform(0.3,0.9)
-    base_rent = random.randint(500,1500)
-    base_units.append(
-        RentalUnit(id=i, quality=quality, base_rent=base_rent)
-    )
-
-# Assign owner-occupiers to units and set up mortgage
-for idx in owner_indices:
-    hh = base_households[idx]
-    unit = base_units[idx]  # 1-to-1 mapping for simplicity
-    unit.assign_owner(hh)
-    # Set up mortgage: assume 80% LTV, 30-year term, 3% rate
-    property_value = unit.base_rent * 12 * 20
-    mortgage_balance = 0.8 * property_value
-    hh.is_owner_occupier = True
-    hh.mortgage_balance = mortgage_balance
-    hh.mortgage_interest_rate = 0.03
-    hh.mortgage_term = 30
-    r = hh.mortgage_interest_rate / 12
-    n = hh.mortgage_term * 12
-    hh.monthly_payment = (mortgage_balance * r * (1 + r) ** n) / ((1 + r) ** n - 1)
-    hh.contract = None  # Not a rental contract
-    hh.housed = True
-    hh.owned_unit = unit  # Reference to owned unit
-
-# Remove owner-occupied units from rental pool for landlords
-rental_units = [u for u in base_units if not u.is_owner_occupied]
-
-def make_landlords(units, compliant_rate=0.7):
-    L = []
-    n_landlords = len(units)//10
-    for j in range(n_landlords):
-        chunk = units[j*10:(j+1)*10]
-        L.append(
-            Landlord(
-                id=j,
-                units=chunk,
-                is_compliant=(random.random() < compliant_rate)
-            )
-        )
-    return L
-
-# 2. Scenario A: With Rent Cap
-hh_cap = copy.deepcopy(base_households)
-u_cap  = copy.deepcopy(base_units)
-rental_units_cap = [u for u in u_cap if not u.is_owner_occupied]
-ll_cap = make_landlords(rental_units_cap)
-market_cap = RentalMarket(u_cap)
-policy_cap = RentCapPolicy(
-    rent_cap_ratio=0.3,
-    max_increase_rate=0.05,
-    inspection_rate=0.1
-)
-sim_cap = Simulation(hh_cap, ll_cap, market_cap, policy_cap, years=2)
-sim_cap.run()
-
-# 3. Scenario B: No Rent Cap
-hh_nocap = copy.deepcopy(base_households)
-u_nocap  = copy.deepcopy(base_units)
-rental_units_nocap = [u for u in u_nocap if not u.is_owner_occupied]
-ll_nocap = make_landlords(rental_units_nocap)
-market_nocap = RentalMarket(u_nocap)
-policy_nocap = RentCapPolicy(
-    rent_cap_ratio=1.0,    # effectively unlimited
-    max_increase_rate=0.2,
-    inspection_rate=0.0
-)
-sim_nocap = Simulation(hh_nocap, ll_nocap, market_nocap, policy_nocap, years=2)
-sim_nocap.run()
-
-# # 4. Now do your visualization (your code here)
-# fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(36, 15))
-# vis_cap = HousingVisualization(sim_cap, ax=ax1)
-# vis_nocap = HousingVisualization(sim_nocap, ax=ax2)
-# ani1 = vis_cap.animate_on_existing_axis()
-# ani2 = vis_nocap.animate_on_existing_axis()
-# plt.show()
-
-
-# Visualization for Rent Cap scenario
-vis_cap = HousingVisualization.with_new_figure(sim_cap)
-ani_cap = vis_cap.animate_on_existing_axis()
-
-# Visualization for No Rent Cap scenario
-vis_nocap = HousingVisualization.with_new_figure(sim_nocap)
-ani_nocap = vis_nocap.animate_on_existing_axis()
-
-# Show both figures
-# plt.show()

@@ -49,7 +49,7 @@ class HousingVisualization:
         self.grid_size = grid_size
         self.spacing = 1.0
 
-        # Title
+        # Title with current period
         self.ax.set_title("Housing Market Simulation", pad=20)
         self.ax.axis('off')
         self.ax.set_xlim(-0.5, grid_size*self.spacing + 8)  # Increased right limit
@@ -111,10 +111,17 @@ class HousingVisualization:
         # Get current metrics
         m = self.sim.metrics[frame]
 
+        # Update title with current period
+        self.ax.set_title(f"Housing Market Simulation - Year {m['year']}, Period {m['period']}", pad=20)
+
         # Draw grid
         for i in range(self.grid_size + 1):
             self.ax.axhline(y=i * self.spacing, color='gray', alpha=0.2)
             self.ax.axvline(x=i * self.spacing, color='gray', alpha=0.2)
+
+        # Get current occupancy state
+        current_occupancy = self.sim.occupancy_history[frame]
+        occupancy_dict = {unit_id: (hh_id, size) for unit_id, hh_id, size in current_occupancy}
 
         # Draw houses and households
         self.house_patches = []  # Reset house patches for hover
@@ -123,10 +130,14 @@ class HousingVisualization:
             x = col * self.spacing
             y = (self.grid_size - row - 1) * self.spacing
 
+            # Get current occupancy state for this unit
+            hh_id, size = occupancy_dict.get(unit.id, (None, 0))
+            is_occupied = hh_id is not None
+
             # Draw house (square)
             color = (
                 'royalblue' if getattr(unit, 'is_owner_occupied', False)
-                else 'limegreen' if unit.occupied
+                else 'limegreen' if is_occupied
                 else 'lightgray'
             )
             house = plt.Rectangle(
@@ -149,10 +160,10 @@ class HousingVisualization:
             self.ax.text(x, y - 0.34, f"Unit {unit.id}", ha='center', va='center', fontsize=8)
 
             # Draw household if occupied
-            if unit.occupied:
-                size = unit.tenant.size if not getattr(unit, 'is_owner_occupied', False) else 1
-                for j in range(size):
-                    offset_x = (j - (size - 1) / 2) * 0.15
+            if is_occupied:
+                household_size = size if not getattr(unit, 'is_owner_occupied', False) else 1
+                for j in range(household_size):
+                    offset_x = (j - (household_size - 1) / 2) * 0.15
                     px = x + offset_x
                     py = y - 0.05
                     # Draw stick figure
@@ -249,20 +260,17 @@ class HousingVisualization:
         movement_logs = []
         for household in self.sim.households:
             if household.timeline:
-                # Get events from this month
-                current_month_events = [
+                # Get events from this period
+                current_period_events = [
                     event for event in household.timeline 
-                    if event.year == self.sim.metrics[frame]['year'] 
-                    and event.month == self.sim.metrics[frame]['month']
+                    if event.year == m['year'] and event.period == m['period']
                     and event.record.get('type') == 'MOVED_IN'
                 ]
-                for event in current_month_events:
-                    # Determine the most important reason
+                for event in current_period_events:
                     move_reason = event.record.get('move_reason', 'Unknown')
                     from_unit = event.record.get('from_unit_id')
                     is_house_to_house = event.record.get('is_house_to_house', False)
                     
-                    # Create move info with source unit if it's a house-to-house move
                     if is_house_to_house:
                         move_info = (
                             f"HH {household.id} moved from Unit {from_unit} to Unit {event.record['unit_id']}\n"
@@ -280,7 +288,7 @@ class HousingVisualization:
 
         # Combine stats and movement logs
         sidebar = (
-            f"Month: {m['year']}-{m['month']:02d}\n\n"
+            f"Year {m['year']}, Period {m['period']}\n\n"
             f"Avg Satisfaction: {m['satisfaction']:.2f}\n"
             f"Avg Rent: ${m['avg_rent']:.0f}\n"
             f"Avg Rent Burden: {m['avg_burden']:.2f}\n"
@@ -326,6 +334,8 @@ class HousingVisualization:
 
         # Draw
         self.fig.canvas.draw()
+
+        return []  # Return empty list since we're not using blit
 
     def on_hover(self, event):
         if not event.inaxes:
@@ -387,39 +397,37 @@ class HousingVisualization:
         self.fig.canvas.draw_idle()
 
     def _on_key_press(self, event):
-        if event.key == ' ':
+        if event.key == ' ' and hasattr(self, 'anim') and self.anim is not None:
             self.paused = not self.paused
             if self.anim:
-                (self.anim.event_source.stop() if self.paused
-                 else self.anim.event_source.start())
+                if self.paused:
+                    self.anim.event_source.stop()
+                else:
+                    self.anim.event_source.start()
 
     def animate(self):
+        """Create and show the animation."""
         self.anim = animation.FuncAnimation(
             self.fig, self._update,
             frames=len(self.sim.metrics),
-            interval=1000,
-            repeat=False
+            interval=500,  # Default to 0.5 seconds per frame for longer simulations
+            repeat=True,  # Allow animation to repeat
+            blit=False    # Redraw entire figure each frame
         )
         plt.show()
         return self.anim
 
-    def animate_on_existing_axis(self, interval=1000):
+    def animate_on_existing_axis(self, interval=500):  # Default to 0.5 seconds
         """
         Create the animation for this visualization on its axis, but do NOT call plt.show().
         Returns the FuncAnimation object.
-        Usage for side-by-side comparison:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(36, 15))
-            vis1 = HousingVisualization(sim1, ax=ax1)
-            vis2 = HousingVisualization(sim2, ax=ax2)
-            ani1 = vis1.animate_on_existing_axis()
-            ani2 = vis2.animate_on_existing_axis()
-            plt.show()
         """
         self.anim = animation.FuncAnimation(
             self.fig, self._update,
             frames=len(self.sim.metrics),
             interval=interval,
-            repeat=False
+            repeat=True,  # Allow animation to repeat
+            blit=False    # Redraw entire figure each frame
         )
         return self.anim
 
@@ -430,13 +438,16 @@ class HousingVisualization:
 
 def show_housing_visualization(*simulations):
     visualizations = []
+    animations = []  # Keep track of animation objects
     for sim in simulations:
         # Create a new figure for each simulation
         fig, ax = plt.subplots(figsize=(18, 12))
         vis = HousingVisualization(sim, ax=ax)
-        vis.animate()  # This will show each figure
+        anim = vis.animate_on_existing_axis()  # Create animation but don't show yet
         visualizations.append(vis)
-    return visualizations
+        animations.append(anim)
+    plt.show()  # Show all figures at once
+    return visualizations, animations
 
 def get_positions(n):
     grid_size = int(np.ceil(np.sqrt(n)))
@@ -451,6 +462,7 @@ def get_positions(n):
 def export_frames(sim, filename):
     frames = []
     movement_logs = []
+    unhoused_data = []
 
     for frame_idx, metrics in enumerate(sim.metrics):
         frame = []
@@ -462,27 +474,40 @@ def export_frames(sim, filename):
         # Build lookup for households and their stats
         hh_map = {hh.id: hh for hh in sim.households}
 
-        # Log movements this month
+        # Track household events for this period
+        household_events = {}  # unit_id -> event_type ('breakup' or 'merger')
+
+        # Log movements and household events this period
         for hh in sim.households:
             for event in hh.timeline:
-                if (event.year == metrics["year"] and event.month == metrics["month"]
-                    and event.record.get("type") == "MOVED_IN"):
-                    from_unit = event.record.get('from_unit_id')
-                    is_house_to_house = event.record.get('is_house_to_house', False)
-                    
-                    if is_house_to_house:
-                        logs.append(
-                            f"HH {hh.id} moved from Unit {from_unit} to Unit {event.record['unit_id']}, "
-                            f"Reason: {event.record['move_reason']}, "
-                            f"New Rent: ${event.record['rent']:.0f}"
-                        )
-                    else:
-                        source = "Unhoused" if from_unit is None else f"Unit {from_unit}"
-                        logs.append(
-                            f"HH {hh.id} moved from {source} to Unit {event.record['unit_id']}, "
-                            f"Reason: {event.record['move_reason']}, "
-                            f"New Rent: ${event.record['rent']:.0f}"
-                        )
+                if event.year == metrics["year"] and event.period == metrics["period"]:
+                    if event.record.get("type") == "MOVED_IN":
+                        from_unit = event.record.get('from_unit_id')
+                        is_house_to_house = event.record.get('is_house_to_house', False)
+                        
+                        if is_house_to_house:
+                            logs.append(
+                                f"HH {hh.id} moved from Unit {from_unit} to Unit {event.record['unit_id']}, "
+                                f"Reason: {event.record['move_reason']}, "
+                                f"New Rent: ${event.record['rent']:.0f}"
+                            )
+                        else:
+                            source = "Unhoused" if from_unit is None else f"Unit {from_unit}"
+                            logs.append(
+                                f"HH {hh.id} moved from {source} to Unit {event.record['unit_id']}, "
+                                f"Reason: {event.record['move_reason']}, "
+                                f"New Rent: ${event.record['rent']:.0f}"
+                            )
+                    elif event.record.get("type") == "HOUSEHOLD_BREAKUP":
+                        unit_id = event.record.get("unit_id")
+                        if unit_id is not None:
+                            household_events[unit_id] = 'breakup'
+                            logs.append(f"HH {hh.id} broke up in Unit {unit_id}")
+                    elif event.record.get("type") == "HOUSEHOLD_MERGER":
+                        unit_id = event.record.get("unit_id")
+                        if unit_id is not None:
+                            household_events[unit_id] = 'merger'
+                            logs.append(f"HH {hh.id} merged in Unit {unit_id}")
 
         for unit in sim.rental_market.units:
             unit_id = unit.id
@@ -514,10 +539,28 @@ def export_frames(sim, filename):
                 'owner_mortgage': getattr(owner, 'mortgage_balance', 0) if owner else 0,
                 'owner_monthly_payment': getattr(owner, 'monthly_payment', 0) if owner else 0,
                 'owner_satisfaction': getattr(owner, 'satisfaction', 0) if owner else 0,
+                'household_event': household_events.get(unit_id, None)  # Add household event type
             })
+
+        # Collect unhoused household data for this frame
+        unhoused_households = [h for h in sim.households if not h.housed]
+        unhoused_frame_data = {
+            'count': len(unhoused_households),
+            'households': [
+                {
+                    'id': h.id,
+                    'size': h.size,
+                    'income': h.income,
+                    'wealth': h.wealth,
+                    'life_stage': h.life_stage,
+                    'satisfaction': getattr(h, 'satisfaction', 0)
+                } for h in unhoused_households
+            ]
+        }
 
         frames.append(frame)
         movement_logs.append(logs)
+        unhoused_data.append(unhoused_frame_data)
 
     # Save frames
     with open(filename, 'wb') as f:
@@ -527,4 +570,9 @@ def export_frames(sim, filename):
     movement_logs_filename = filename.replace('.pkl', '_movement_logs.pkl')
     with open(movement_logs_filename, 'wb') as f:
         pickle.dump(movement_logs, f)
+        
+    # Save unhoused data
+    unhoused_filename = filename.replace('.pkl', '_unhoused.pkl')
+    with open(unhoused_filename, 'wb') as f:
+        pickle.dump(unhoused_data, f)
 
