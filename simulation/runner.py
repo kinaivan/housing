@@ -66,23 +66,23 @@ class Simulation:
         households_to_remove = []
         new_households = []
 
-        # 1. Household departures (leaving the neighborhood) - increased rate
+        # 1. Household departures (leaving the neighborhood) - reduced rates
         for household in self.households:
             if household not in households_to_remove:
-                # Increased departure rates for dynamic behavior
-                leave_chance = 0.05  # Base 5% chance per period (increased from 0.1%)
+                # Lower base departure rate
+                leave_chance = 0.02  # Base 2% chance per period
                 
-                # Increase chance if household is struggling
-                if household.current_rent_burden() > 0.5:
-                    leave_chance += 0.1  # Strong incentive to leave if struggling
+                # Moderate incentives to leave
+                if household.current_rent_burden() > 0.6:  # Increased threshold
+                    leave_chance += 0.05  # Reduced penalty
                 if not household.housed:
-                    leave_chance += 0.15  # Very high chance for unhoused to leave
-                if household.satisfaction < 0.3:
-                    leave_chance += 0.08
+                    leave_chance += 0.08  # Still higher for unhoused but not as extreme
+                if household.satisfaction < 0.2:  # More extreme dissatisfaction threshold
+                    leave_chance += 0.04
                 
                 # Age-based factors
                 if household.age > 75:
-                    leave_chance += 0.1  # Retirement/moving away
+                    leave_chance += 0.05  # Reduced from 0.1
                 
                 if random.random() < leave_chance:
                     # If leaving, properly handle their current housing
@@ -92,18 +92,18 @@ class Simulation:
                     households_to_remove.append(household)
                     actions_this_step += 1
 
-        # 2. Household breakups (more common now) - people splitting up
+        # 2. Household breakups - reduced rates
         for household in self.households:
             if household not in households_to_remove and household.size > 1:
-                breakup_chance = 0.08  # Base 8% chance per period (much higher)
+                breakup_chance = 0.04  # Base 4% chance per period (reduced from 8%)
                 
-                # Increased chance based on various factors
-                if household.satisfaction < 0.4:
-                    breakup_chance += 0.1
-                if household.current_rent_burden() > 0.5:
-                    breakup_chance += 0.12
-                if household.size > 3:  # Large households more likely to split
+                # Moderate chance increases
+                if household.satisfaction < 0.3:  # More extreme threshold
                     breakup_chance += 0.05
+                if household.current_rent_burden() > 0.6:  # Increased threshold
+                    breakup_chance += 0.06
+                if household.size > 3:
+                    breakup_chance += 0.03
                 
                 if random.random() < breakup_chance:
                     # Split into two households
@@ -111,34 +111,31 @@ class Simulation:
                     if new_size > 0:
                         new_hh = self._create_new_household()
                         new_hh.size = new_size
-                        new_hh.wealth = household.wealth * 0.4  # Split wealth
-                        new_hh.income = household.income * 0.6  # New household gets lower income initially
+                        new_hh.wealth = household.wealth * 0.4
+                        new_hh.income = household.income * 0.6
                         household.size -= new_size
                         household.wealth *= 0.6
                         new_households.append(new_hh)
                         actions_this_step += 1
                         
-                        # Record breakup event
                         if household.contract and household.contract.unit:
                             household.record_breakup_event(new_hh, year, period)
                         
-                        # Handle housing situation - new household becomes unhoused initially
                         new_hh.housed = False
                         new_hh.contract = None
 
-        # 3. Household mergers/sharing (people moving in together) - increased rate
+        # 3. Household mergers/sharing - increased success rate
         unhoused_households = [h for h in self.households if not h.housed and h not in households_to_remove]
         housed_households = [h for h in self.households if h.housed and h not in households_to_remove]
         
         # Try to get unhoused households to share with housed ones
-        for unhoused_hh in unhoused_households[:3]:  # Limit to prevent too many actions
+        for unhoused_hh in unhoused_households[:3]:
             for housed_hh in housed_households:
                 if (housed_hh.contract and housed_hh.contract.unit and 
-                    len(housed_hh.contract.unit.tenants) < 2 and  # Max 2 households per unit
+                    len(housed_hh.contract.unit.tenants) < 2 and
                     abs(housed_hh.age - unhoused_hh.age) < 15 and
-                    random.random() < 0.15):  # 15% chance of sharing
+                    random.random() < 0.25):  # Increased from 0.15 to 0.25
                     
-                    # Move unhoused household to share the unit
                     unit = housed_hh.contract.unit
                     unit.add_tenant(unhoused_hh)
                     unhoused_hh.contract = Contract(unhoused_hh, unit)
@@ -146,21 +143,22 @@ class Simulation:
                     unhoused_hh.calculate_satisfaction()
                     actions_this_step += 1
                     
-                    # Record merger event
                     housed_hh.record_merger_event(unhoused_hh, year, period)
                     break
 
-        # 4. New household arrivals (people moving into the neighborhood) - much higher rate
+        # 4. New household arrivals - increased rate and more likely when population is low
         current_population = len(self.households) - len(households_to_remove) + len(new_households)
-        target_population = 100  # Try to maintain around 100 households
+        target_population = 100
         
-        # High arrival rate to maintain population and create activity
-        arrival_rate = 0.15  # 15% chance per step (much higher)
+        # Dynamic arrival rate based on current population
+        population_deficit = max(0, target_population - current_population)
+        base_arrival_rate = 0.25  # Increased base rate
+        arrival_rate = base_arrival_rate + (population_deficit * 0.01)  # Increases with deficit
         
         # Add more households if below target
         while current_population < target_population and random.random() < arrival_rate:
             new_household = self._create_new_household()
-            new_household.housed = False  # Start as unhoused
+            new_household.housed = False
             new_households.append(new_household)
             actions_this_step += 1
             current_population += 1
@@ -170,7 +168,7 @@ class Simulation:
             if household in self.households:
                 self.households.remove(household)
 
-        # Add new households from lifecycle events and arrivals
+        # Add new households
         self.households.extend(new_households)
         
         return actions_this_step
@@ -179,7 +177,7 @@ class Simulation:
         # Track total actions for this step
         total_actions = 0
         
-        # Process population changes first (returns action count)
+        # Process population changes first
         population_actions = self._process_population_changes(year, period)
         total_actions += population_actions
         
@@ -197,14 +195,14 @@ class Simulation:
             was_housed = household.housed
             current_unit = household.contract.unit if household.contract else None
             
-            # Check for potential eviction due to high rent burden
+            # Check for potential eviction due to high rent burden - reduced risk
             if (household.housed and 
                 household.contract is not None):
                 
                 rent_burden = household.current_rent_burden()
-                # Gradual eviction risk based on rent burden
-                if rent_burden > 0.6:  # Start risk at 60% burden (increased threshold)
-                    eviction_risk = (rent_burden - 0.6) * 3  # More aggressive eviction
+                # More lenient eviction risk
+                if rent_burden > 0.7:  # Increased threshold
+                    eviction_risk = (rent_burden - 0.7) * 1.5  # Reduced multiplier
                     if random.random() < eviction_risk:
                         household.contract.unit.remove_tenant(household)
                         household.contract = None
@@ -271,10 +269,18 @@ class Simulation:
         # Record occupancy for this step
         step_occupancy = []
         for unit in self.rental_market.units:
-            if unit.occupied and unit.tenants:
-                # Record all tenants in the unit
-                for tenant in unit.tenants:
-                    step_occupancy.append((unit.id, tenant.id, tenant.size))
+            if unit.occupied:
+                # Get all tenants in the unit
+                if hasattr(unit, 'tenants') and unit.tenants:
+                    # Multiple tenants case
+                    for tenant in unit.tenants:
+                        step_occupancy.append((unit.id, tenant.id, tenant.size))
+                elif unit.tenant:  # Single tenant case
+                    step_occupancy.append((unit.id, unit.tenant.id, unit.tenant.size))
+                else:
+                    # Somehow marked as occupied but no tenants
+                    unit.occupied = False
+                    step_occupancy.append((unit.id, None, 0))
             else:
                 # Vacant unit
                 step_occupancy.append((unit.id, None, 0))

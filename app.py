@@ -210,28 +210,28 @@ def make_figure(frame, grid_size, prev_frame=None, is_cap_scenario=True, movemen
                 household_text.append(f"{'Owner' if u['is_owner_occupied'] else 'Tenant'} in Unit {u['unit_id']}")
                 household_colors.append("rgba(0,0,0,0)")  # Invisible markers for hover only
 
-        # Add household event indicators (breakup/merger)
+        # Add household event indicators (breakup/merger) - ENHANCED
         if u.get('household_event') == 'breakup':
-            # Add exclamation mark
+            # Add larger exclamation mark
             shapes.append(dict(
                 type="line",
-                x0=x, y0=y+0.5, x1=x, y1=y+0.3,
-                line=dict(color="red", width=2),
+                x0=x, y0=y+0.6, x1=x, y1=y+0.35,  # Made taller
+                line=dict(color="red", width=3),  # Made thicker
                 layer="above"
             ))
             shapes.append(dict(
                 type="circle",
-                x0=x-0.02, y0=y+0.2, x1=x+0.02, y1=y+0.24,
-                line=dict(color="red", width=2),
+                x0=x-0.03, y0=y+0.25, x1=x+0.03, y1=y+0.31,  # Made larger
+                line=dict(color="red", width=3),  # Made thicker
                 fillcolor="red",
                 layer="above"
             ))
         elif u.get('household_event') == 'merger':
-            # Add check mark
+            # Add larger check mark
             shapes.append(dict(
                 type="path",
-                path=f'M {x-0.1},{y+0.35} L {x},{y+0.25} L {x+0.15},{y+0.45}',
-                line=dict(color="green", width=2),
+                path=f'M {x-0.15},{y+0.4} L {x},{y+0.25} L {x+0.2},{y+0.5}',  # Made larger
+                line=dict(color="green", width=3),  # Made thicker
                 layer="above"
             ))
 
@@ -243,6 +243,7 @@ def make_figure(frame, grid_size, prev_frame=None, is_cap_scenario=True, movemen
     # Create a mapping of household IDs to their positions for movement tracking
     unhoused_positions = {}
     
+    # Calculate positions for unhoused households
     for i in range(unhoused_count):
         row = i // 2  # 2 households per row
         col = i % 2
@@ -253,59 +254,150 @@ def make_figure(frame, grid_size, prev_frame=None, is_cap_scenario=True, movemen
         if i < len(unhoused_households):
             household_id = unhoused_households[i]['id']
             unhoused_positions[household_id] = (px, py)
-        
-        # Add stick figure parts for unhoused households
-        # Head
-        shapes.append(dict(
-            type="circle",
-            x0=px-0.04, y0=py+0.02, x1=px+0.04, y1=py+0.10,
-            line=dict(color="rgba(34,34,34,1)", width=1),
-            fillcolor="rgba(228,26,28,1)",  # #e41a1c
-            layer="above"
-        ))
-        # Body
-        shapes.append(dict(
-            type="line",
-            x0=px, y0=py+0.02, x1=px, y1=py-0.02,
-            line=dict(color="rgba(34,34,34,1)", width=1.5),
-            layer="above"
-        ))
-        # Arms
-        shapes.append(dict(
-            type="line",
-            x0=px-0.04, y0=py-0.04, x1=px, y1=py,
-            line=dict(color="rgba(34,34,34,1)", width=1.5),
-            layer="above"
-        ))
-        shapes.append(dict(
-            type="line",
-            x0=px, y0=py, x1=px+0.04, y1=py-0.04,
-            line=dict(color="rgba(34,34,34,1)", width=1.5),
-            layer="above"
-        ))
-        # Legs
-        shapes.append(dict(
-            type="line",
-            x0=px, y0=py-0.02, x1=px-0.03, y1=py-0.08,
-            line=dict(color="rgba(34,34,34,1)", width=1.5),
-            layer="above"
-        ))
-        shapes.append(dict(
-            type="line",
-            x0=px, y0=py-0.02, x1=px+0.03, y1=py-0.08,
-            line=dict(color="rgba(34,34,34,1)", width=1.5),
-            layer="above"
-        ))
-        
-        household_x.append(px)
-        household_y.append(py)
-        # Add hover info for unhoused households
-        if i < len(unhoused_households):
-            hh_info = unhoused_households[i]
-            household_text.append(f"Unhoused Household {hh_info['id']}<br>Size: {hh_info['size']}<br>Income: ${hh_info['income']:.0f}<br>Wealth: ${hh_info['wealth']:.0f}<br>Life Stage: {hh_info['life_stage']}")
-        else:
-            household_text.append("Unhoused Household")
-        household_colors.append("rgba(0,0,0,0)")  # Invisible markers for hover only
+            
+            # Add stick figure parts for unhoused households
+            # Head
+            shapes.append(dict(
+                type="circle",
+                x0=px-0.04, y0=py+0.02, x1=px+0.04, y1=py+0.10,
+                line=dict(color="rgba(34,34,34,1)", width=1),
+                fillcolor="rgba(228,26,28,1)",  # #e41a1c
+                layer="above"
+            ))
+            # Body
+            shapes.append(dict(
+                type="line",
+                x0=px, y0=py+0.02, x1=px, y1=py-0.02,
+                line=dict(color="rgba(34,34,34,1)", width=1.5),
+                layer="above"
+            ))
+            # Arms
+            shapes.append(dict(
+                type="line",
+                x0=px-0.04, y0=py-0.04, x1=px, y1=py,
+                line=dict(color="rgba(34,34,34,1)", width=1.5),
+                layer="above"
+            ))
+            shapes.append(dict(
+                type="line",
+                x0=px, y0=py, x1=px+0.04, y1=py-0.04,
+                line=dict(color="rgba(34,34,34,1)", width=1.5),
+                layer="above"
+            ))
+            # Legs
+            shapes.append(dict(
+                type="line",
+                x0=px, y0=py-0.02, x1=px-0.03, y1=py-0.08,
+                line=dict(color="rgba(34,34,34,1)", width=1.5),
+                layer="above"
+            ))
+            shapes.append(dict(
+                type="line",
+                x0=px, y0=py-0.02, x1=px+0.03, y1=py-0.08,
+                line=dict(color="rgba(34,34,34,1)", width=1.5),
+                layer="above"
+            ))
+            
+            # Add hover info for unhoused households
+            household_x.append(px)
+            household_y.append(py)
+            household_text.append(f"Unhoused HH {household_id} - Size: {unhoused_households[i]['size']}, Income: ${unhoused_households[i]['income']:.0f}")
+            household_colors.append("rgba(0,0,0,0)")  # Invisible markers for hover only
+
+    # Add movement arrows if we have previous frame data and movement logs
+    if prev_frame is not None and movement_logs:
+        for log in movement_logs:
+            if "moved from" in log:
+                parts = log.split()
+                hh_id = int(parts[1])  # "HH X moved from..."
+                from_unit = None if "Unhoused" in log else int(parts[4])  # "... from Unit X to..."
+                to_unit = int(parts[7])  # "... to Unit X, ..."
+                
+                # Get source position
+                if from_unit is None:
+                    # Moving from unhoused area - get position from prev_unhoused_data
+                    if prev_unhoused_data and 'households' in prev_unhoused_data:
+                        for i, hh in enumerate(prev_unhoused_data['households']):
+                            if hh['id'] == hh_id:
+                                row = i // 2
+                                col = i % 2
+                                start_x = waiting_area_x + col * 0.5
+                                start_y = grid_size - 1 - row * 0.5
+                                break
+                else:
+                    # Moving from a unit
+                    row, col = divmod(from_unit - 1, grid_size)
+                    start_x = col
+                    start_y = grid_size - row - 1
+                
+                # Get destination position (always a unit)
+                row, col = divmod(to_unit - 1, grid_size)
+                end_x = col
+                end_y = grid_size - row - 1
+                
+                # Add arrow if we have valid start and end positions
+                if 'start_x' in locals():
+                    # Calculate curve control points
+                    dx = end_x - start_x
+                    dy = end_y - start_y
+                    dist = np.sqrt(dx*dx + dy*dy)
+                    
+                    if dist > 0:
+                        # Make curve more pronounced for longer distances
+                        curve_height = min(1.0, dist * 0.3)
+                        mid_x = (start_x + end_x) / 2
+                        mid_y = (start_y + end_y) / 2
+                        
+                        # Perpendicular vector for curve control
+                        perp_x = -dy / dist * curve_height
+                        perp_y = dx / dist * curve_height
+                        
+                        # Control point
+                        ctrl_x = mid_x + perp_x
+                        ctrl_y = mid_y + perp_y
+                        
+                        # Draw curved path
+                        path = f"M {start_x},{start_y} Q {ctrl_x},{ctrl_y} {end_x},{end_y}"
+                        shapes.append(dict(
+                            type="path",
+                            path=path,
+                            line=dict(
+                                color="rgba(0,0,0,0.6)",  # Made more visible
+                                width=2,
+                                dash="dot"
+                            ),
+                            layer="below"
+                        ))
+                        
+                        # Add arrowhead at end
+                        # Calculate direction at end point
+                        end_dx = end_x - ctrl_x
+                        end_dy = end_y - ctrl_y
+                        end_dist = np.sqrt(end_dx*end_dx + end_dy*end_dy)
+                        
+                        if end_dist > 0:
+                            end_dx /= end_dist
+                            end_dy /= end_dist
+                            
+                            # Calculate arrow points
+                            arrow_size = 0.2
+                            arrow_angle = np.pi/6  # 30 degrees
+                            
+                            ax = end_x - arrow_size * (end_dx*np.cos(arrow_angle) + end_dy*np.sin(arrow_angle))
+                            ay = end_y - arrow_size * (end_dy*np.cos(arrow_angle) - end_dx*np.sin(arrow_angle))
+                            bx = end_x - arrow_size * (end_dx*np.cos(arrow_angle) - end_dy*np.sin(arrow_angle))
+                            by = end_y - arrow_size * (end_dy*np.cos(arrow_angle) + end_dx*np.sin(arrow_angle))
+                            
+                            # Add arrowhead
+                            shapes.append(dict(
+                                type="path",
+                                path=f"M {end_x},{end_y} L {ax},{ay} M {end_x},{end_y} L {bx},{by}",
+                                line=dict(
+                                    color="rgba(0,0,0,0.6)",  # Made more visible
+                                    width=2
+                                ),
+                                layer="below"
+                            ))
 
     # Create the main figure
     fig = go.Figure()
@@ -335,94 +427,6 @@ def make_figure(frame, grid_size, prev_frame=None, is_cap_scenario=True, movemen
         name='Households'
     ))
 
-    # Add movement arrows if we have movement logs for this frame
-    if movement_logs is not None and current_month is not None and current_month < len(movement_logs):
-        movements = []
-        
-        # Create position mapping for previous unhoused households (for movement tracking)
-        prev_unhoused_positions = {}
-        if prev_unhoused_data and 'households' in prev_unhoused_data:
-            for i, hh_info in enumerate(prev_unhoused_data['households']):
-                row = i // 2
-                col = i % 2
-                px = waiting_area_x + col * 0.5
-                py = grid_size - 1 - row * 0.5
-                prev_unhoused_positions[hh_info['id']] = (px, py)
-        
-        # Parse each movement log entry to get source and destination units
-        for log_entry in movement_logs[current_month]:
-            # Parse the movement log entry to extract unit numbers and household ID
-            # Example format: "HH X moved from Unit Y to Unit Z" or "HH X moved from Unhoused to Unit Z"
-            parts = log_entry.split(", ")[0]  # Get the first part with movement info
-            
-            # Extract household ID
-            hh_id = None
-            if "HH " in parts:
-                hh_id_str = parts.split("HH ")[1].split(" ")[0]
-                try:
-                    hh_id = int(hh_id_str)
-                except:
-                    hh_id = None
-            
-            if "moved from Unit" in parts:
-                # Extract source and destination unit numbers
-                source_unit = int(parts.split("Unit ")[1].split(" to")[0])
-                dest_unit = int(parts.split("to Unit ")[1])
-                
-                # Get source unit position
-                source_row, source_col = divmod(source_unit, grid_size)
-                source_x = source_col
-                source_y = grid_size - source_row - 1
-                
-                # Get destination unit position
-                dest_row, dest_col = divmod(dest_unit, grid_size)
-                dest_x = dest_col
-                dest_y = grid_size - dest_row - 1
-                
-                movements.append({
-                    'from_x': source_x,
-                    'from_y': source_y,
-                    'to_x': dest_x,
-                    'to_y': dest_y,
-                    'color': 'blue'  # house-to-house moves
-                })
-            elif "moved from Unhoused to Unit" in parts:
-                # Extract destination unit number
-                dest_unit = int(parts.split("to Unit ")[1])
-                
-                # Get destination unit position
-                dest_row, dest_col = divmod(dest_unit, grid_size)
-                dest_x = dest_col
-                dest_y = grid_size - dest_row - 1
-                
-                # Try to find the specific household's position from previous frame
-                from_x, from_y = waiting_area_x, grid_size - 1  # Default position
-                if hh_id and hh_id in prev_unhoused_positions:
-                    from_x, from_y = prev_unhoused_positions[hh_id]
-                
-                movements.append({
-                    'from_x': from_x,
-                    'from_y': from_y,
-                    'to_x': dest_x,
-                    'to_y': dest_y,
-                    'color': 'green'  # unhoused to housed moves
-                })
-
-        # Add all movement arrows
-        for move in movements:
-            fig.add_trace(go.Scatter(
-                x=[move['from_x'], move['to_x']],
-                y=[move['from_y'], move['to_y']],
-                mode='lines+markers',
-                line=dict(
-                    color=move['color'],
-                    width=2,
-                    dash='dot'
-                ),
-                marker=dict(symbol=['circle', 'arrow-right']),
-                showlegend=False
-            ))
-
     fig.update_layout(
         shapes=shapes,
         annotations=annotations,
@@ -442,15 +446,13 @@ def make_figure(frame, grid_size, prev_frame=None, is_cap_scenario=True, movemen
         ),
         margin=dict(l=20, r=20, t=40, b=20),
         plot_bgcolor='white',
-        height=1000,
         showlegend=False,
         hovermode='closest',
         transition={
             'duration': 500,
             'easing': 'cubic-in-out'
         },
-        autosize=False,
-        width=1700,  # or match your style
+        autosize=True  # Let the container control the size
     )
 
     return fig
@@ -462,24 +464,89 @@ app.config.suppress_callback_exceptions = True
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     html.Div([
-        html.H1("Housing Market Simulation"),
+        # Enhanced header with modern styling
         html.Div([
-            html.A("With Rent Cap", href="/with-cap", style={'marginRight': '20px'}),
-            html.A("Without Rent Cap", href="/without-cap", style={'marginRight': '20px'}),
-            html.A("About the Model", href="/about")
-        ], style={'marginBottom': '20px'})
+            html.H1("Housing Market Simulation", 
+                   style={
+                       'fontFamily': 'Helvetica Neue, Arial, sans-serif',
+                       'fontSize': '2.5rem',
+                       'fontWeight': '300',
+                       'color': '#2c3e50',
+                       'marginBottom': '20px',
+                       'textAlign': 'center',
+                       'letterSpacing': '0.05em',
+                       'borderBottom': '2px solid #3498db',
+                       'paddingBottom': '10px'
+                   }),
+            # Navigation menu with modern styling
+            html.Div([
+                html.A("With Rent Cap", 
+                      href="/with-cap", 
+                      style={
+                          'backgroundColor': '#3498db',
+                          'color': 'white',
+                          'padding': '10px 20px',
+                          'borderRadius': '5px',
+                          'textDecoration': 'none',
+                          'marginRight': '15px',
+                          'transition': 'background-color 0.3s ease',
+                          'fontWeight': '500',
+                          'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+                      }),
+                html.A("Without Rent Cap", 
+                      href="/without-cap", 
+                      style={
+                          'backgroundColor': '#2ecc71',
+                          'color': 'white',
+                          'padding': '10px 20px',
+                          'borderRadius': '5px',
+                          'textDecoration': 'none',
+                          'marginRight': '15px',
+                          'transition': 'background-color 0.3s ease',
+                          'fontWeight': '500',
+                          'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+                      }),
+                html.A("About the Model", 
+                      href="/about", 
+                      style={
+                          'backgroundColor': '#e74c3c',
+                          'color': 'white',
+                          'padding': '10px 20px',
+                          'borderRadius': '5px',
+                          'textDecoration': 'none',
+                          'transition': 'background-color 0.3s ease',
+                          'fontWeight': '500',
+                          'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+                      })
+            ], style={
+                'display': 'flex',
+                'justifyContent': 'center',
+                'alignItems': 'center',
+                'marginBottom': '30px'
+            })
+        ], style={
+            'backgroundColor': 'white',
+            'padding': '20px',
+            'boxShadow': '0 2px 10px rgba(0,0,0,0.1)',
+            'marginBottom': '30px'
+        }),
     ]),
     # Add interval and store components to main layout
     dcc.Store(id='prev-month', data=0),
     dcc.Store(id='scenario-type', data='cap'),
     dcc.Interval(
         id='auto-stepper',
-        interval=1000,  # in milliseconds (1 second per step)
+        interval=2000,  # Changed to 2000ms (2 seconds)
         n_intervals=0,
         disabled=True
     ),
-    html.Div(id='page-content')
-])
+    html.Div(id='page-content', style={'height': '100vh'})
+], style={
+    'backgroundColor': '#f5f6fa',
+    'minHeight': '100vh',
+    'margin': '0',
+    'padding': '0'
+})
 
 def create_page_layout(is_cap_scenario):
     title = "Housing Market Simulation (With Rent Cap)" if is_cap_scenario else "Housing Market Simulation (Without Rent Cap)"
@@ -494,74 +561,120 @@ def create_page_layout(is_cap_scenario):
                    for i in range(0, total_periods, 2)}  # Show every year
     
     return html.Div([
-        html.H1(title),
+        html.H1(title, style={
+            'fontFamily': 'Helvetica Neue, Arial, sans-serif',
+            'fontSize': '2rem',
+            'fontWeight': '300',
+            'color': '#2c3e50',
+            'marginBottom': '20px',
+            'textAlign': 'center'
+        }),
         html.Div([
+            # Main visualization container
             html.Div([
                 dcc.Graph(
-                    id='graph', 
+                    id='graph',
                     style={
-                        'height': '1000px', 
-                        'width': '1700px',
-                        'margin': '0',
-                        'padding': '0'
+                        'width': '100%',
+                        'height': '100%'  # Take full height of container
                     },
                     config={
-                        'displayModeBar': False,  # Hide plotly toolbar
-                        'staticPlot': False,
-                        'responsive': False  # Disable responsive behavior
+                        'displayModeBar': False,
+                        'responsive': True
                     }
                 )
             ], style={
-                'width': '70vw', 
-                'height': '80vh',
-                'overflow': 'hidden',  # Prevent scrollbars from affecting layout
-                'display': 'flex',
-                'justifyContent': 'center',
-                'alignItems': 'center'
+                'flex': '3',
+                'backgroundColor': 'white',
+                'borderRadius': '10px',
+                'boxShadow': '0 2px 10px rgba(0,0,0,0.1)',
+                'padding': '20px',
+                'marginRight': '20px',
+                'height': 'calc(100vh - 250px)',  # Fixed height based on viewport
+                'minHeight': '600px'  # Minimum height
             }),
+            
+            # Sidebar container
             html.Div([
-                html.Div(id='sidebar-stats', style={'marginBottom': '20px'}),
-                html.H4("Movement Log", style={'marginBottom': '10px'}),
+                html.Div(id='sidebar-stats', style={
+                    'marginBottom': '20px',
+                    'backgroundColor': 'white',
+                    'borderRadius': '10px',
+                    'padding': '15px',
+                    'boxShadow': '0 2px 6px rgba(0,0,0,0.1)'
+                }),
+                html.H4("Movement Log", style={
+                    'color': '#2c3e50',
+                    'marginBottom': '10px',
+                    'fontFamily': 'Helvetica Neue, Arial, sans-serif'
+                }),
                 html.Div(id='movement-log', style={
-                    'maxHeight': '200px', 
+                    'maxHeight': 'calc(100vh - 500px)',
                     'overflowY': 'auto',
                     'fontFamily': 'monospace',
                     'whiteSpace': 'pre-wrap',
-                    'padding': '10px',
-                    'backgroundColor': '#fafafa',
-                    'border': '1px solid #ccc',
-                    'borderRadius': '5px'
+                    'padding': '15px',
+                    'backgroundColor': 'white',
+                    'borderRadius': '10px',
+                    'boxShadow': '0 2px 6px rgba(0,0,0,0.1)'
                 })
             ], style={
-                'width': '28vw', 
-                'padding': '1vw', 
-                'marginLeft': '1vw',
-                'height': '80vh',
-                'overflow': 'auto'
+                'flex': '1',
+                'minWidth': '300px',
+                'maxWidth': '400px'
             })
         ], style={
-            'display': 'flex', 
-            'flex-direction': 'row',
-            'height': '80vh',
-            'width': '100vw'
+            'display': 'flex',
+            'margin': '20px',
+            'height': 'calc(100vh - 250px)'  # Match container height
         }),
-        dcc.Slider(
-            id='period-slider',
-            min=0,
-            max=total_periods-1,
-            value=0,
-            marks=slider_marks,
-            step=1,
-            updatemode='drag'
-        ),
-        html.Button('Play/Pause', id='play-button', style={'marginTop': '10px'}),
+        
+        # Controls container
+        html.Div([
+            html.Div([
+                dcc.Slider(
+                    id='period-slider',
+                    min=0,
+                    max=total_periods-1,
+                    value=0,
+                    marks=slider_marks,
+                    step=1,
+                    updatemode='drag'
+                )
+            ], style={'marginBottom': '20px'}),
+            html.Button('Play/Pause', 
+                       id='play-button', 
+                       style={
+                           'backgroundColor': '#3498db',
+                           'color': 'white',
+                           'padding': '10px 20px',
+                           'border': 'none',
+                           'borderRadius': '5px',
+                           'cursor': 'pointer',
+                           'fontWeight': '500',
+                           'boxShadow': '0 2px 4px rgba(0,0,0,0.1)',
+                           'transition': 'background-color 0.3s ease'
+                       })
+        ], style={
+            'padding': '20px',
+            'backgroundColor': 'white',
+            'borderRadius': '10px',
+            'boxShadow': '0 2px 10px rgba(0,0,0,0.1)',
+            'margin': '20px'
+        }),
+        
+        # Add interval with 2-second duration
         dcc.Interval(
             id='auto-stepper',
-            interval=1000,  # in milliseconds (1 second per step)
+            interval=2000,  # Changed to 2000ms (2 seconds)
             n_intervals=0,
             disabled=True
         )
-    ])
+    ], style={
+        'backgroundColor': '#f5f6fa',
+        'minHeight': '100vh',
+        'padding': '20px'
+    })
 
 def create_about_page():
     return html.Div([

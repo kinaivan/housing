@@ -190,28 +190,46 @@ class Household:
         # Multi-factor satisfaction calculation
         rent_burden = self.contract.unit.rent / self.income
         quality_score = self.contract.unit.quality
-        size_match = 1 - abs(self.size - self.contract.unit.size) / max(self.size, self.contract.unit.size)
+        
+        # Size satisfaction accounts for total household size in unit
+        total_household_size = self.contract.unit.get_total_household_size()
+        size_match = 1 - abs(total_household_size - self.contract.unit.size) / max(total_household_size, self.contract.unit.size)
+        
+        # Location and amenity scores
         location_score = self.contract.unit.location_score if hasattr(self.contract.unit, 'location_score') else 0.5
         amenity_score = self.contract.unit.amenity_score if hasattr(self.contract.unit, 'amenity_score') else 0.5
 
+        # Sharing penalty - reduces satisfaction if sharing with others
+        sharing_penalty = 0
+        if len(self.contract.unit.tenants) > 1:
+            sharing_penalty = 0.1 * (len(self.contract.unit.tenants) - 1)  # 10% penalty per additional household
+
         # Weighted satisfaction calculation
         weights = {
-            'rent_burden': self.cost_sensitivity*10,
+            'rent_burden': self.cost_sensitivity * 10,
             'quality': self.quality_preference,
-            'size': 0.3,
+            'size': 1.0,
             'location': self.location_preference,
             'amenities': self.amenity_preference
         }
 
-        satisfaction = (
-            (1 - rent_burden) * weights['rent_burden'] +
-            quality_score * weights['quality'] +
-            size_match * weights['size'] +
-            location_score * weights['location'] +
-            amenity_score * weights['amenities']
-        ) / sum(weights.values())
+        # Calculate component scores
+        scores = {
+            'rent_burden': max(0, 1 - rent_burden),  # Higher score for lower burden
+            'quality': quality_score,
+            'size': size_match,
+            'location': 1 - abs(self.location_preference - location_score),  # Match to preference
+            'amenities': amenity_score
+        }
 
-        self.satisfaction = max(0, min(1, satisfaction))
+        # Calculate weighted average
+        total_weight = sum(weights.values())
+        weighted_satisfaction = sum(scores[k] * weights[k] for k in weights.keys()) / total_weight
+
+        # Apply sharing penalty
+        weighted_satisfaction = max(0, weighted_satisfaction - sharing_penalty)
+
+        self.satisfaction = weighted_satisfaction
 
     def calculate_satisfaction_owner(self):
         # Owner-occupier satisfaction based on their owned unit
@@ -239,174 +257,166 @@ class Household:
         self.satisfaction = max(0, min(1, satisfaction))
 
     def consider_moving(self, market, policy, year, period):
+        """Consider whether to move to a new unit"""
         # If not housed, always try to find housing
         if not self.housed:
-            self._search_for_housing(market, policy, year, period)
+            # First try to find ideal housing
+            new_unit = self._search_for_housing(market, policy, year, period)
+            if new_unit:
+                self.move_to(new_unit, year, period)
+                return
+            
+            # If desperate (searching for a while), consider sharing
+            if self.search_duration > 2:
+                # Look for units that could accommodate sharing
+                potential_shared_units = [
+                    u for u in market.units 
+                    if u.occupied and len(u.tenants) == 1 
+                    and u.get_total_household_size() + self.size <= u.size * 1.5  # Allow some overcrowding
+                ]
+                
+                # Sort by compatibility
+                def sharing_compatibility(unit):
+                    primary_tenant = unit.tenants[0]
+                    age_diff = abs(self.age - primary_tenant.age)
+                    stage_match = self.life_stage == primary_tenant.life_stage
+                    effective_rent = unit.rent / 2  # Split rent
+                    rent_burden = effective_rent / self.income
+                    
+                    score = 1.0
+                    if age_diff > 15:
+                        score *= 0.8
+                    if not stage_match:
+                        score *= 0.8
+                    if rent_burden > 0.4:
+                        score *= 0.7
+                    return score
+                
+                potential_shared_units.sort(key=sharing_compatibility, reverse=True)
+                
+                # Try to share with most compatible household
+                if potential_shared_units:
+                    share_chance = 0.3 * (1 + self.search_duration / 6)  # Increases with search duration
+                    if random.random() < share_chance:
+                        self.move_to(potential_shared_units[0], year, period)
+                        return
+            
+            self.search_duration += 1
             return
-
-        # Much higher base move chance for dynamic behavior
-        base_move_chance = 0.2  # 20% base chance per period (increased from 5%)
+            
+        # If housed, consider moving based on satisfaction and other factors
+        move_chance = 0.2  # Base 20% chance to consider moving
         
-        # Satisfaction-based adjustments
-        satisfaction_factor = (1 - self.satisfaction) * 0.3
-        base_move_chance += satisfaction_factor
-        
-        # Rent burden adjustments - very sensitive to high costs
+        # Adjust based on satisfaction
+        if self.satisfaction < 0.3:
+            move_chance += 0.3
+        elif self.satisfaction < 0.5:
+            move_chance += 0.15
+            
+        # Adjust based on rent burden
         rent_burden = self.current_rent_burden()
-        if rent_burden > 0.3:
-            base_move_chance += (rent_burden - 0.3) * 0.8  # Strong incentive to move
+        if rent_burden > 0.5:
+            move_chance += 0.2
+        elif rent_burden > 0.4:
+            move_chance += 0.1
+            
+        # Adjust based on household characteristics
+        move_chance *= self.mobility_preference
         
-        # Opportunity-based movement - look for better deals
-        vacant_units = [u for u in market.units if not u.occupied and not getattr(u, 'is_owner_occupied', False)]
-        if vacant_units:
-            # Check if there are significantly cheaper options
-            current_rent = self.contract.unit.rent if self.contract else float('inf')
-            cheapest_vacant = min(unit.rent for unit in vacant_units)
-            if cheapest_vacant < current_rent * 0.8:  # 20% cheaper
-                base_move_chance += 0.3  # Strong incentive to move for savings
-        
-        # Time-based adjustments - less stability, more movement
-        time_factor = min(1, self.months_in_current_unit / 12)
-        base_move_chance *= (1 - time_factor * 0.3)  # Slight reduction for tenure
-        
-        # Life stage adjustments - young people move more
-        life_stage_multipliers = {
-            "young_adult": 1.5,
-            "family_formation": 1.2,
-            "established": 1.0,
-            "retirement": 0.7
-        }
-        base_move_chance *= life_stage_multipliers.get(self.life_stage, 1.0)
-        
-        # Market condition adjustments
-        vacancy_rate = market.market_conditions['vacancy_rate']
-        if vacancy_rate > 0.05:  # Easier to move when more options
-            base_move_chance *= 1.4
-        
-        # Random life events (job change, relationship, etc.)
-        if random.random() < 0.05:  # 5% chance of major life event
-            base_move_chance += 0.4
-        
-        # Cap the final move chance
-        move_chance = min(0.7, base_move_chance)  # Maximum 70% chance per period
-        
+        # Reduce moving if recently moved
+        if self.months_in_current_unit < 6:
+            move_chance *= 0.5
+            
+        # Consider moving
         if random.random() < move_chance:
-            self._search_for_housing(market, policy, year, period)
+            # Search for better housing
+            new_unit = self._search_for_housing(market, policy, year, period)
+            if new_unit:
+                # Only move if new unit is significantly better
+                current_satisfaction = self.satisfaction
+                
+                # Temporarily calculate satisfaction in new unit
+                old_contract = self.contract
+                self.contract = Contract(self, new_unit)
+                self.calculate_satisfaction()
+                potential_satisfaction = self.satisfaction
+                self.contract = old_contract
+                self.calculate_satisfaction()  # Restore original satisfaction
+                
+                # Move if new unit offers significant improvement
+                if potential_satisfaction > current_satisfaction + 0.15:
+                    self.move_to(new_unit, year, period)
 
     def _search_for_housing(self, market, policy, year, period):
-        self.search_duration += 1
+        """Search for housing that meets household's preferences"""
+        available_units = [u for u in market.units if not u.occupied or len(u.tenants) < 2]  # Allow up to 2 households per unit
         
-        # Much more aggressive search behavior
-        desperation_factor = min(2.0, 1 + (self.search_duration / 6) * 0.8)
-        
+        if not available_units:
+            return None
+
         def calculate_unit_score(unit):
             # Skip if clearly unaffordable (more lenient threshold)
-            max_affordable = self.income * 0.6 * desperation_factor  # Increased from 0.5
-            if unit.rent > max_affordable:
-                return -1
+            if unit.rent > self.income * 0.8:  # 80% of income as max rent
+                return -float('inf')
+            
+            # Calculate effective rent (full rent if sole tenant, half if sharing)
+            effective_rent = unit.rent
+            if unit.occupied and unit.tenants:  # If would be sharing
+                effective_rent = unit.rent / 2
+            
+            # Skip if effective rent still too high
+            if effective_rent > self.income * 0.5:  # 50% of income as max effective rent
+                return -float('inf')
+            
+            # Calculate rent burden based on effective rent
+            rent_burden = effective_rent / self.income
+            
+            # Calculate size match considering current occupants
+            total_size = self.size
+            if unit.occupied and unit.tenants:
+                total_size += sum(t.size for t in unit.tenants)
+            size_match = 1 - abs(total_size - unit.size) / max(total_size, unit.size)
+            
+            # Sharing penalty
+            sharing_penalty = 0
+            if unit.occupied and unit.tenants:
+                sharing_penalty = 0.2  # 20% penalty for sharing
                 
-            # Base score components
-            quality_score = unit.quality * self.quality_preference
-            size_match = 1 - abs(self.size - unit.size) / max(self.size, unit.size)
-            location_score = getattr(unit, 'location_score', 0.5) * self.location_preference
+                # Additional penalties for mismatched characteristics
+                primary_tenant = unit.tenants[0]
+                age_diff = abs(self.age - primary_tenant.age)
+                if age_diff > 15:  # Big age gap
+                    sharing_penalty += 0.1
+                if self.life_stage != primary_tenant.life_stage:  # Different life stages
+                    sharing_penalty += 0.1
             
-            # Much stronger affordability preference - prioritize cheaper units
-            affordability = max(0, 1 - (unit.rent / self.income) / 0.5)  # Strong preference for affordable
-            
-            # Big bonus for vacant units
-            vacancy_bonus = 0.5 if not unit.occupied else 0
-            
-            # Calculate base score with higher weight on affordability and vacancy
-            base_score = (
-                quality_score * 0.2 +
-                size_match * 0.2 +
-                location_score * 0.15 +
-                affordability * 0.35 +  # Higher weight on affordability
-                vacancy_bonus * 0.1     # Bonus for vacant units
+            # Base score calculation
+            score = (
+                (1 - rent_burden) * self.cost_sensitivity * 10 +
+                unit.quality * self.quality_preference +
+                size_match * 1.0 +
+                (1 - abs(self.location_preference - unit.location)) * self.location_preference +
+                unit.amenity_score * self.amenity_preference
             )
             
-            # Strong bonuses for vacant units
+            # Apply sharing penalty
+            score = score * (1 - sharing_penalty)
+            
+            # Vacancy bonus - empty units are slightly preferred
             if not unit.occupied:
-                base_score *= 1.8  # Big preference for vacant units
-            else:
-                # Penalty for displacing others, but less than before
-                displacement_penalty = 0.2
-                base_score *= (1 - displacement_penalty)
-                
-                # Check if current tenant might leave anyway
-                if unit.tenant and unit.tenant.satisfaction < 0.4:
-                    base_score *= 1.3  # Bonus if current tenant is dissatisfied
+                score *= 1.1
             
-            # Apply desperation factor more aggressively
-            base_score *= desperation_factor
-            
-            # Random factor to prevent identical scores
-            base_score += random.uniform(-0.02, 0.02)
-            
-            return base_score
+            return score
 
-        # Get all potential units
-        potential_units = []
-        for unit in market.units:
-            # Skip if unit is owner-occupied
-            if getattr(unit, 'is_owner_occupied', False):
-                continue
-                
-            # Calculate score and add to potential units
-            score = calculate_unit_score(unit)
-            if score > 0:  # Only consider positive scores
-                potential_units.append((unit, score))
-        
         # Sort units by score
-        potential_units.sort(key=lambda x: x[1], reverse=True)
+        scored_units = [(u, calculate_unit_score(u)) for u in available_units]
+        scored_units.sort(key=lambda x: x[1], reverse=True)
         
-        # Try to find a suitable unit - much more lenient acceptance
-        for unit, score in potential_units[:8]:  # Consider top 8 options
-            # Much lower threshold for acceptance
-            min_score = 0.3 / desperation_factor
-            
-            if score > min_score:
-                if unit.occupied:
-                    # Be more aggressive about displacing current tenants
-                    current_tenant = unit.tenant
-                    if current_tenant:
-                        # Only displace if we have higher score or they're dissatisfied
-                        if (score > 0.6 or 
-                            current_tenant.satisfaction < 0.5 or
-                            self.search_duration > 3):
-                            
-                            # Move current tenant out
-                            unit.remove_tenant(current_tenant)
-                            current_tenant.contract = None
-                            current_tenant.housed = False
-                            current_tenant.satisfaction = 0
-                            current_tenant.search_duration = 0
-                            
-                            # Move to the unit
-                            self.move_to(unit, year, period)
-                            self.search_duration = 0
-                            return
-                else:
-                    # If unit is vacant, definitely move in
-                    self.move_to(unit, year, period)
-                    self.search_duration = 0
-                    return
+        # Return best unit if it meets minimum score threshold
+        if scored_units and scored_units[0][1] > 0:
+            return scored_units[0][0]
         
-        # If still searching and desperate, consider sharing
-        if self.search_duration > 2:
-            # Look for units with only one household that could accommodate sharing
-            for unit in market.units:
-                if (unit.occupied and len(unit.tenants) == 1 and 
-                    not getattr(unit, 'is_owner_occupied', False) and
-                    unit.get_total_household_size() + self.size <= 6):  # Don't overcrowd
-                    
-                    if random.random() < 0.3:  # 30% chance to share when desperate
-                        unit.add_tenant(self)
-                        self.contract = Contract(self, unit)
-                        self.housed = True
-                        self.calculate_satisfaction()
-                        self.search_duration = 0
-                        return
+        return None
 
     def _accept_compromise_housing(self, market, policy, year, period):
         # Find the best available unit that meets minimum requirements
@@ -420,32 +430,43 @@ class Household:
             self.search_duration = 0
 
     def move_to(self, unit, year, period):
+        """Move household to a new unit"""
         # Store previous unit info before vacating
-        previous_unit_id = None
-        if self.contract:
-            previous_unit_id = self.contract.unit.id
-            self.contract.unit.vacate()
+        prev_unit = self.contract.unit if self.contract else None
+        prev_rent = prev_unit.rent if prev_unit else None
+        
+        # Leave current unit if housed
+        if self.contract and self.contract.unit:
+            self.contract.unit.remove_tenant(self)
+        
+        # Move into new unit
+        if unit.occupied:
+            # Moving into shared unit
+            unit.add_tenant(self)
+        else:
+            # Taking over empty unit
+            unit.assign(self)
             
-        unit.assign(self)
+        # Create new contract
         self.contract = Contract(self, unit)
         self.housed = True
         self.months_in_current_unit = 0
+        self.search_duration = 0
+        
+        # Calculate initial satisfaction
         self.calculate_satisfaction()
-
-        # Determine the primary reason for moving
+        
+        # Record the move
         move_reason = self._determine_move_reason(unit)
-
-        # Create movement event with source unit information
-        event_data = {
+        self.add_event({
             "type": "MOVED_IN",
             "unit_id": unit.id,
-            "rent": unit.rent,
+            "from_unit_id": prev_unit.id if prev_unit else None,
             "move_reason": move_reason,
-            "from_unit_id": previous_unit_id,  # Add source unit tracking
-            "is_house_to_house": previous_unit_id is not None  # Flag for house-to-house moves
-        }
-        
-        self.add_event(event_data, year, period)
+            "rent": unit.rent,
+            "is_house_to_house": prev_unit is not None,
+            "is_sharing": len(unit.tenants) > 1
+        }, year, period)
 
     def _determine_move_reason(self, new_unit):
         if not self.housed:
