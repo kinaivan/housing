@@ -172,36 +172,75 @@ class Landlord:
             # Calculate market rent
             market_rent = unit.calculate_market_rent(market_conditions)
             
-            # Landlord's desired rent based on greed and market awareness
-            desired_rent = unit.rent * (1 + 0.02 * self.greed_factor * self.market_awareness)
+            # Market conditions factors
+            market_demand = market_conditions.get('market_demand', 0.5)
+            vacancy_rate = market_conditions.get('vacancy_rate', 0.1)
+            price_index = market_conditions.get('price_index', 100)
             
-            # If unit is vacant, be more aggressive with price adjustments
+            # Base market adjustment (can be positive or negative)
+            market_pressure = (market_demand - 0.5) * 2  # -1 to +1 range
+            vacancy_pressure = (0.15 - vacancy_rate) * 2  # Negative when high vacancy
+            
+            # Landlord's market responsiveness
+            market_adjustment = (market_pressure + vacancy_pressure) * 0.5 * self.market_awareness
+            
+            # If unit is vacant, be more responsive to market conditions
             if not unit.occupied:
-                # Vacant units: drop rent to attract tenants
                 if unit.vacancy_duration > 0:
-                    # More aggressive drops for longer vacancies
-                    vacancy_discount = min(0.3, 0.08 * (unit.vacancy_duration / 2))
-                    desired_rent = unit.rent * (1 - vacancy_discount)
-                    # But don't go below 60% of base rent
-                    desired_rent = max(unit.base_rent * 0.6, desired_rent)
+                    # Aggressive rent adjustments for vacant units
+                    if market_demand < 0.4 or vacancy_rate > 0.2:
+                        # Market is soft - reduce rents significantly
+                        vacancy_discount = min(0.25, 0.05 + 0.08 * (unit.vacancy_duration / 2))
+                        desired_rent = unit.rent * (1 - vacancy_discount)
+                    elif market_demand > 0.6 and vacancy_rate < 0.1:
+                        # Hot market - can increase even vacant units
+                        desired_rent = unit.rent * (1 + 0.05 * self.greed_factor)
+                    else:
+                        # Moderate market - small adjustment toward market rate
+                        adjustment = market_adjustment * 0.1
+                        desired_rent = unit.rent * (1 + adjustment)
+                    
+                    # But don't go below 50% of base rent or above 200%
+                    desired_rent = max(unit.base_rent * 0.5, min(unit.base_rent * 2.0, desired_rent))
                 else:
-                    # Try market rate for newly vacant units
+                    # Newly vacant - try market rate first
                     desired_rent = market_rent
             else:
-                # Occupied units: be more conservative, apply policy limits
-                if self.is_compliant:
-                    max_increase = policy.max_increase_rate
-                    desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
+                # Occupied units: balance market conditions with tenant retention
+                base_adjustment = 0.02 * self.greed_factor * self.market_awareness
                 
-                # Consider tenant retention vs profit
+                # Apply market pressure (can be negative)
+                total_adjustment = base_adjustment + market_adjustment * 0.05
+                
+                # Tenant satisfaction consideration
                 if len(unit.tenants) > 0:
                     avg_satisfaction = sum(t.satisfaction for t in unit.tenants) / len(unit.tenants)
-                    if avg_satisfaction < 0.5:
-                        # Tenant might leave, be more conservative
-                        desired_rent = min(desired_rent, unit.rent * 1.02)
+                    
+                    # If tenants are unhappy, be more conservative
+                    if avg_satisfaction < 0.4:
+                        total_adjustment = min(total_adjustment, -0.01)  # Small decrease or no increase
+                    elif avg_satisfaction < 0.6:
+                        total_adjustment = min(total_adjustment, 0.01)   # Small increase only
+                    
+                    # If market is soft and tenants are satisfied, might reduce rent to retain them
+                    if market_demand < 0.4 and avg_satisfaction > 0.7:
+                        total_adjustment = min(total_adjustment, -0.005)  # Small decrease to retain good tenants
+                
+                desired_rent = unit.rent * (1 + total_adjustment)
+                
+                # Apply policy limits for compliant landlords
+                if self.is_compliant:
+                    max_increase = policy.max_increase_rate
+                    # Policy typically only limits increases, not decreases
+                    if total_adjustment > 0:
+                        desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
             
-            # Apply the rent change
-            unit.rent = max(unit.base_rent * 0.5, desired_rent)
+            # Economic cycle effects
+            cycle_adjustment = np.sin(price_index / 20) * 0.01  # Small cyclical adjustment
+            desired_rent *= (1 + cycle_adjustment)
+            
+            # Apply the rent change with reasonable bounds
+            unit.rent = max(unit.base_rent * 0.4, min(unit.base_rent * 2.5, desired_rent))
 
     def collect_rent(self, periods=1):
         total_rent = 0

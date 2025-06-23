@@ -48,6 +48,10 @@ class Household:
         # Search parameters
         self.search_duration = 0
         self.max_search_duration = int(12 * (1 - self.search_patience))  # Max months to search
+        
+        # Merger tracking
+        self.is_merged = False
+        self.merge_instability = 0.0  # Higher values increase breakup chance
 
         # Mortgage attributes
         self.is_owner_occupier = is_owner_occupier
@@ -258,48 +262,53 @@ class Household:
 
     def consider_moving(self, market, policy, year, period):
         """Consider whether to move to a new unit"""
-        # If not housed, always try to find housing
+        # If not housed, try to find housing but with more limitations
         if not self.housed:
-            # First try to find ideal housing
-            new_unit = self._search_for_housing(market, policy, year, period)
-            if new_unit:
-                self.move_to(new_unit, year, period)
-                return
+            # Only try to find housing if not too picky or desperate enough
+            search_desperation = min(1.0, self.search_duration / 8.0)  # Becomes desperate over time
+            search_threshold = 0.3 + (1 - self.search_patience) * 0.4  # Pickier households search less often
             
-            # If desperate (searching for a while), consider sharing
-            if self.search_duration > 2:
-                # Look for units that could accommodate sharing
-                potential_shared_units = [
-                    u for u in market.units 
-                    if u.occupied and len(u.tenants) == 1 
-                    and u.get_total_household_size() + self.size <= u.size * 1.5  # Allow some overcrowding
-                ]
+            if random.random() < search_threshold + search_desperation:
+                # First try to find ideal housing
+                new_unit = self._search_for_housing(market, policy, year, period)
+                if new_unit:
+                    self.move_to(new_unit, year, period)
+                    return
                 
-                # Sort by compatibility
-                def sharing_compatibility(unit):
-                    primary_tenant = unit.tenants[0]
-                    age_diff = abs(self.age - primary_tenant.age)
-                    stage_match = self.life_stage == primary_tenant.life_stage
-                    effective_rent = unit.rent / 2  # Split rent
-                    rent_burden = effective_rent / self.income
+                # If desperate (searching for a while), consider sharing
+                if self.search_duration > 4:  # Increased threshold for sharing
+                    # Look for units that could accommodate sharing
+                    potential_shared_units = [
+                        u for u in market.units 
+                        if u.occupied and len(u.tenants) == 1 
+                        and u.get_total_household_size() + self.size <= u.size * 1.3  # Reduced overcrowding tolerance
+                    ]
                     
-                    score = 1.0
-                    if age_diff > 15:
-                        score *= 0.8
-                    if not stage_match:
-                        score *= 0.8
-                    if rent_burden > 0.4:
-                        score *= 0.7
-                    return score
-                
-                potential_shared_units.sort(key=sharing_compatibility, reverse=True)
-                
-                # Try to share with most compatible household
-                if potential_shared_units:
-                    share_chance = 0.3 * (1 + self.search_duration / 6)  # Increases with search duration
-                    if random.random() < share_chance:
-                        self.move_to(potential_shared_units[0], year, period)
-                        return
+                    # Sort by compatibility
+                    def sharing_compatibility(unit):
+                        primary_tenant = unit.tenants[0]
+                        age_diff = abs(self.age - primary_tenant.age)
+                        stage_match = self.life_stage == primary_tenant.life_stage
+                        effective_rent = unit.rent / 2  # Split rent
+                        rent_burden = effective_rent / self.income
+                        
+                        score = 1.0
+                        if age_diff > 15:
+                            score *= 0.6  # Stricter age matching
+                        if not stage_match:
+                            score *= 0.6  # Stricter life stage matching
+                        if rent_burden > 0.4:
+                            score *= 0.5  # More rent burden sensitive
+                        return score
+                    
+                    potential_shared_units.sort(key=sharing_compatibility, reverse=True)
+                    
+                    # Try to share with most compatible household (reduced chance)
+                    if potential_shared_units:
+                        share_chance = 0.2 * (1 + self.search_duration / 10)  # Reduced and slower increase
+                        if random.random() < share_chance:
+                            self.move_to(potential_shared_units[0], year, period)
+                            return
             
             self.search_duration += 1
             return
@@ -431,41 +440,28 @@ class Household:
 
     def move_to(self, unit, year, period):
         """Move household to a new unit"""
-        # Store previous unit info before vacating
-        prev_unit = self.contract.unit if self.contract else None
-        prev_rent = prev_unit.rent if prev_unit else None
+        old_unit = self.contract.unit if self.contract else None
+        old_unit_id = old_unit.id if old_unit else None
         
-        # Leave current unit if housed
-        if self.contract and self.contract.unit:
-            self.contract.unit.remove_tenant(self)
-        
-        # Move into new unit
-        if unit.occupied:
-            # Moving into shared unit
-            unit.add_tenant(self)
-        else:
-            # Taking over empty unit
-            unit.assign(self)
+        # End current contract if exists
+        if self.contract:
+            old_unit = self.contract.unit
+            old_unit.remove_tenant(self)
+            self.contract = None
             
         # Create new contract
         self.contract = Contract(self, unit)
+        unit.add_tenant(self)
         self.housed = True
         self.months_in_current_unit = 0
-        self.search_duration = 0
-        
-        # Calculate initial satisfaction
-        self.calculate_satisfaction()
         
         # Record the move
-        move_reason = self._determine_move_reason(unit)
         self.add_event({
             "type": "MOVED_IN",
             "unit_id": unit.id,
-            "from_unit_id": prev_unit.id if prev_unit else None,
-            "move_reason": move_reason,
+            "old_unit_id": old_unit_id,
             "rent": unit.rent,
-            "is_house_to_house": prev_unit is not None,
-            "is_sharing": len(unit.tenants) > 1
+            "quality": unit.quality
         }, year, period)
 
     def _determine_move_reason(self, new_unit):
@@ -514,7 +510,12 @@ class Household:
             self.contract.update()
 
     def add_event(self, info, year, period):
-        self.timeline.append(new_timeline_entry(info, year, period))
+        """Add an event to the household's timeline"""
+        if year is not None and period is not None:
+            self.timeline.append(new_timeline_entry(info, year, period))
+            # Keep only the last 10 events to prevent memory bloat
+            if len(self.timeline) > 10:
+                self.timeline = self.timeline[-10:]
 
     def process_mortgage_month(self):
         if self.is_owner_occupier and self.mortgage_balance > 0:
@@ -527,13 +528,14 @@ class Household:
             # Dutch-style: interest is tax-deductible (simulate as income boost)
             self.income += interest  # crude, but for visualization
 
-    def buy_home(self, unit):
+    def buy_home(self, unit, property_value=None):
         # Remove from rental if currently renting
         if self.contract:
             self.contract.unit.vacate()
             self.contract = None
         # Pay down payment, set up mortgage
-        property_value = unit.base_rent * 12 * 20
+        if property_value is None:
+            property_value = unit.base_rent * 12 * 15  # More conservative fallback
         down_payment = 0.2 * property_value
         mortgage_balance = 0.8 * property_value
         self.wealth -= down_payment
@@ -548,10 +550,11 @@ class Household:
         self.owned_unit = unit
         unit.assign_owner(self)
 
-    def sell_home(self):
+    def sell_home(self, property_value=None):
         unit = getattr(self, 'owned_unit', None)
         if unit is not None:
-            property_value = unit.base_rent * 12 * 20
+            if property_value is None:
+                property_value = unit.base_rent * 12 * 15  # More conservative fallback
             equity = max(0, property_value - getattr(self, 'mortgage_balance', 0))
             self.wealth += equity
             self.mortgage_balance = 0
@@ -563,23 +566,25 @@ class Household:
             self.contract = None
 
     def record_breakup_event(self, new_household, year, period):
-        if self.contract:
-            unit_id = self.contract.unit.id
+        """Record a household breakup event"""
+        if self.contract and self.contract.unit:
             self.add_event({
                 "type": "HOUSEHOLD_BREAKUP",
-                "unit_id": unit_id,
+                "unit_id": self.contract.unit.id,
                 "original_size": self.size + new_household.size,
-                "new_size": self.size,
-                "new_household_id": new_household.id
+                "remaining_size": self.size,
+                "new_household_id": new_household.id,
+                "new_household_size": new_household.size
             }, year, period)
 
     def record_merger_event(self, other_household, year, period):
-        if self.contract:
-            unit_id = self.contract.unit.id
+        """Record a household merger event"""
+        if self.contract and self.contract.unit:
             self.add_event({
                 "type": "HOUSEHOLD_MERGER",
-                "unit_id": unit_id,
+                "unit_id": self.contract.unit.id,
                 "original_size": self.size,
-                "merged_size": self.size + other_household.size,
-                "merged_with_id": other_household.id
+                "other_household_id": other_household.id,
+                "other_household_size": other_household.size,
+                "combined_size": self.size + other_household.size
             }, year, period)

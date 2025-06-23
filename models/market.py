@@ -23,11 +23,14 @@ class RentalMarket:
         }
 
     def _calculate_average_rent(self):
-        return np.mean([u.rent for u in self.units])
+        rents = [u.rent for u in self.units]
+        return np.mean(rents) if rents else 0
 
     def _calculate_vacancy_rate(self):
+        if not self.units:
+            return 0
         vacant = len([u for u in self.units if not u.occupied])
-        return vacant / len(self.units) if self.units else 0
+        return vacant / len(self.units)
 
     def _calculate_location_premiums(self):
         location_rents = defaultdict(list)
@@ -35,7 +38,7 @@ class RentalMarket:
             location_rents[round(unit.location, 1)].append(unit.rent)
         
         return {
-            loc: np.mean(rents) for loc, rents in location_rents.items()
+            loc: np.mean(rents) if rents else 0 for loc, rents in location_rents.items()
         }
 
     def update_market_conditions(self):
@@ -64,9 +67,12 @@ class RentalMarket:
 
         # Update price index
         if self.historical_data['rents']:
-            base_rent = np.mean(self.historical_data['rents'][0])
+            base_rent = self.historical_data['rents'][0]  # First value is already a mean
             current_rent = self._calculate_average_rent()
-            self.market_conditions['price_index'] = (current_rent / base_rent) * 100
+            if base_rent > 0:
+                self.market_conditions['price_index'] = (current_rent / base_rent) * 100
+            else:
+                self.market_conditions['price_index'] = 100
 
         self._store_historical_data()
         self._update_market_demand()
@@ -88,9 +94,15 @@ class RentalMarket:
         
         # Add trend factor based on historical data
         trend_factor = 1.0
-        if len(self.historical_data['rents']) > 2:
-            recent_trend = np.mean(self.historical_data['rents'][-2:]) / np.mean(self.historical_data['rents'][-4:-2])
-            trend_factor = 1 + (recent_trend - 1) * 0.5  # Dampen the trend effect
+        if len(self.historical_data['rents']) > 3:
+            recent_rents = self.historical_data['rents'][-2:]
+            older_rents = self.historical_data['rents'][-4:-2]
+            if recent_rents and older_rents:
+                recent_avg = np.mean(recent_rents)
+                older_avg = np.mean(older_rents)
+                if older_avg > 0:
+                    recent_trend = recent_avg / older_avg
+                    trend_factor = 1 + (recent_trend - 1) * 0.5  # Dampen the trend effect
         
         # More dynamic market demand based on conditions
         base_demand = 0.5 + (0.2 if self.market_conditions['vacancy_rate'] > 0.1 else -0.1)
