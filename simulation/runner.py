@@ -366,8 +366,10 @@ class Simulation:
         # Government inspects units (twice per period)
         for landlord in self.landlords:
             for unit in landlord.units:
-                if unit.occupied and random.random() < self.policy.inspection_rate * 2:
-                    self.policy.inspect(unit)
+                inspection_rate = self.policy.inspection_rate if self.policy else 0.0  # No inspections when policy is disabled
+                if unit.occupied and random.random() < inspection_rate * 2:
+                    if self.policy:  # Only inspect if there's a policy in place
+                        self.policy.inspect(unit)
 
         # Landlords collect rent (6 months worth)
         for landlord in self.landlords:
@@ -567,7 +569,7 @@ class Simulation:
             "avg_burden": avg_burden,
             "satisfaction": avg_satisfaction,
             "profit": total_profit,
-            "violations": self.policy.violations_found,
+            "violations": self.policy.violations_found if self.policy else 0,
             "avg_income": avg_income,
             "avg_wealth": avg_wealth,
             "avg_quality": avg_quality,

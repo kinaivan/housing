@@ -61,8 +61,8 @@ interface CalculatorResults {
 }
 
 const DEFAULT_INPUTS: CalculatorInputs = {
-  numUnits: 5,
-  purchasePrice: 350000,
+  numUnits: 1,
+  purchasePrice: 300000,
   monthlyRent: 1800,
   downPayment: 35,
   interestRate: 3.5,

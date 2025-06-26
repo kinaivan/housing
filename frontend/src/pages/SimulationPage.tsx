@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Container,
@@ -8,6 +8,8 @@ import {
   ButtonGroup,
   Alert,
   CircularProgress,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -23,6 +25,92 @@ const colors = {
   textDark: '#2C2C2C',     // Dark text
   white: '#FFFFFF',        // Pure white
 };
+
+// Custom Timeline component
+function Timeline({ 
+  currentStep, 
+  totalSteps, 
+  currentYear, 
+  currentPeriod 
+}: { 
+  currentStep: number; 
+  totalSteps: number;
+  currentYear: number;
+  currentPeriod: number;
+}) {
+  // Create markers for every 5 years (10 steps)
+  const markers = Array.from({ length: 7 }, (_, i) => i * 5);
+  
+  // Calculate the actual step (0-based) and ensure it only increases
+  const actualStep = Math.max(0, ((currentYear - 1) * 2) + (currentPeriod - 1));
+  const fillPercentage = Math.min(100, (actualStep / totalSteps) * 100);
+  
+  return (
+    <Box sx={{ width: '100%', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+        <Typography variant="body2" color="text.secondary">
+          Year {currentYear} of 30, Period {currentPeriod}
+        </Typography>
+      </Box>
+      <Box sx={{ position: 'relative', height: '40px', mb: 1 }}>
+        {/* Background track */}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '100%',
+            height: '8px',
+            backgroundColor: colors.yellowLight,
+            borderRadius: '4px',
+          }}
+        />
+        {/* Progress bar */}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: `${fillPercentage}%`,
+            height: '8px',
+            backgroundColor: colors.yellowDark,
+            borderRadius: '4px',
+            transition: 'width 2s ease-in-out',
+          }}
+        />
+        {/* Year markers */}
+        {markers.map((year) => (
+          <Box
+            key={year}
+            sx={{
+              position: 'absolute',
+              left: `${(year / 30) * 100}%`,
+              top: 0,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <Box
+              sx={{
+                width: '2px',
+                height: '12px',
+                backgroundColor: colors.textDark,
+                opacity: 0.3,
+                mb: 0.5,
+              }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              Year {year}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+}
 
 function StatCard({ title, value, subtitle }: { title: string; value: string | number; subtitle?: string }) {
   return (
@@ -54,6 +142,7 @@ function StatCard({ title, value, subtitle }: { title: string; value: string | n
 }
 
 function SimulationPage() {
+  const [rentCapEnabled, setRentCapEnabled] = useState(false);
   const {
     units,
     stats,
@@ -61,18 +150,27 @@ function SimulationPage() {
     isPaused,
     error,
     status,
+    currentYear,
+    currentPeriod,
     startSimulation,
     pauseSimulation,
     resumeSimulation,
     resetSimulation,
   } = useSimulation();
 
+  // Calculate current step (0-based)
+  const totalSteps = 60; // 30 years * 2 periods per year
+  const currentStep = ((currentYear - 1) * 2) + (currentPeriod - 1);
+
   // Start simulation automatically when the page loads
   useEffect(() => {
     if (status === 'idle') {
-      startSimulation();
+      startSimulation({ 
+        rent_cap_enabled: rentCapEnabled,
+        years: 30
+      });
     }
-  }, [status, startSimulation]);
+  }, [status, startSimulation, rentCapEnabled]);
 
   const handlePlayPause = () => {
     if (isPaused) {
@@ -80,7 +178,23 @@ function SimulationPage() {
     } else if (isRunning) {
       pauseSimulation();
     } else {
-      startSimulation();
+      startSimulation({ 
+        rent_cap_enabled: rentCapEnabled,
+        years: 30
+      });
+    }
+  };
+
+  const handleRentCapToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRentCapEnabled(event.target.checked);
+    if (isRunning || isPaused) {
+      resetSimulation();
+      setTimeout(() => {
+        startSimulation({ 
+          rent_cap_enabled: event.target.checked,
+          years: 30
+        });
+      }, 500);
     }
   };
 
@@ -94,22 +208,57 @@ function SimulationPage() {
         <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
           Watch how housing units evolve over time (6-month intervals)
         </Typography>
-        <ButtonGroup variant="contained" size="large" sx={{ mb: 4 }}>
-          <Button
-            onClick={handlePlayPause}
-            startIcon={isPaused || !isRunning ? <PlayArrowIcon /> : <PauseIcon />}
-            disabled={status === 'error'}
-          >
-            {isPaused || !isRunning ? 'Start' : 'Pause'}
-          </Button>
-          <Button
-            onClick={resetSimulation}
-            startIcon={<RestartAltIcon />}
-            disabled={status === 'error'}
-          >
-            Reset
-          </Button>
-        </ButtonGroup>
+
+        {/* Timeline */}
+        {isRunning && (
+          <Timeline 
+            currentStep={((currentYear - 1) * 2) + (currentPeriod - 1)} 
+            totalSteps={60}
+            currentYear={currentYear}
+            currentPeriod={currentPeriod}
+          />
+        )}
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <ButtonGroup variant="contained" size="large">
+            <Button
+              onClick={handlePlayPause}
+              startIcon={isPaused || !isRunning ? <PlayArrowIcon /> : <PauseIcon />}
+              disabled={status === 'error'}
+              sx={{
+                backgroundColor: colors.yellowDark,
+                '&:hover': {
+                  backgroundColor: colors.yellowPrimary,
+                },
+              }}
+            >
+              {status === 'paused' ? 'Resume' : (isRunning ? 'Pause' : 'Start')}
+            </Button>
+            <Button
+              onClick={resetSimulation}
+              startIcon={<RestartAltIcon />}
+              disabled={status === 'error'}
+              sx={{
+                backgroundColor: colors.yellowDark,
+                '&:hover': {
+                  backgroundColor: colors.yellowPrimary,
+                },
+              }}
+            >
+              Reset
+            </Button>
+          </ButtonGroup>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={rentCapEnabled}
+                onChange={handleRentCapToggle}
+                color="primary"
+              />
+            }
+            label={`Rent Cap Policy: ${rentCapEnabled ? 'Enabled' : 'Disabled'}`}
+          />
+        </Box>
       </Box>
 
       {/* Error Message */}

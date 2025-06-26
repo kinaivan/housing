@@ -13,6 +13,7 @@ import {
 import SimulationPage from './pages/SimulationPage';
 import LandlordPage from './pages/LandlordPage';
 import AboutPage from './pages/AboutPage';
+import PropertyDetailPage from './pages/PropertyDetailPage';
 
 // Theme colors
 const colors = {
@@ -107,6 +108,7 @@ function App() {
       <Container maxWidth={false} sx={{ mt: 4 }}>
         <Routes>
           <Route path="/simulation" element={<SimulationPage />} />
+          <Route path="/property/:id" element={<PropertyDetailPage />} />
           <Route path="/landlord" element={<LandlordPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<Navigate to="/simulation" replace />} />

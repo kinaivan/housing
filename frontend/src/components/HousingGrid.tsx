@@ -3,6 +3,7 @@ import { Box, Paper, Typography, Tooltip } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import { useNavigate } from 'react-router-dom';
 
 // Theme colors
 const colors = {
@@ -20,9 +21,40 @@ interface HouseProps {
   id: number;
   rent: number;
   is_occupied: boolean;
+  quality?: number;
+  lastRenovation?: number;
+  household?: {
+    income: number;
+    satisfaction: number;
+    size: number;
+  };
 }
 
-const House: React.FC<HouseProps> = ({ occupants, id, rent, is_occupied }) => {
+const House: React.FC<HouseProps> = ({ 
+  occupants, 
+  id, 
+  rent, 
+  is_occupied, 
+  quality = 0, 
+  lastRenovation = 0,
+  household 
+}) => {
+  const navigate = useNavigate();
+
+  // Calculate rent burden if unit is occupied
+  const rentBurden = household ? ((rent * 12) / household.income * 100).toFixed(1) : 0;
+
+  // Format tooltip content
+  const tooltipContent = `Unit ${id}: ${is_occupied ? 'Occupied' : 'Vacant'}
+Quality: ${(quality * 100).toFixed(0)}%
+${lastRenovation > 0 ? `Last Renovation: ${lastRenovation} months ago` : 'Never Renovated'}
+Rent: $${rent}/month
+
+${is_occupied ? `Residents: ${occupants}
+Tenant Satisfaction: ${(household?.satisfaction ?? 0 * 100).toFixed(0)}%
+Household Income: $${household?.income?.toLocaleString() ?? 0}/year
+Rent Burden: ${rentBurden}% of income` : 'No Current Residents'}`;
+
   // Create an array of occupant icons based on the number of occupants
   const occupantIcons = Array(occupants).fill(null).map((_, index) => (
     <PersonIcon 
@@ -35,15 +67,25 @@ const House: React.FC<HouseProps> = ({ occupants, id, rent, is_occupied }) => {
     />
   ));
 
+  const handleClick = () => {
+    navigate(`/property/${id}`);
+  };
+
   return (
     <Tooltip 
-      title={`Unit ${id + 1}: ${is_occupied ? 'Occupied' : 'Vacant'}
-Rent: $${rent}
-${occupants} resident${occupants !== 1 ? 's' : ''}`}
+      title={tooltipContent}
       arrow
+      placement="top"
+      sx={{
+        '& .MuiTooltip-tooltip': {
+          fontSize: '0.875rem',
+          whiteSpace: 'pre-line',
+        },
+      }}
     >
       <Paper
         elevation={3}
+        onClick={handleClick}
         sx={{
           p: 2,
           height: '100%',
@@ -53,9 +95,17 @@ ${occupants} resident${occupants !== 1 ? 's' : ''}`}
           gap: 1,
           backgroundColor: colors.white,
           transition: 'all 0.3s ease',
+          cursor: 'pointer',
           '&:hover': {
             transform: 'scale(1.05)',
+            boxShadow: 6,
           },
+          // Add quality indicator through border color
+          border: '2px solid',
+          borderColor: quality >= 0.8 ? '#4caf50' : 
+                      quality >= 0.6 ? '#8bc34a' :
+                      quality >= 0.4 ? '#ffeb3b' :
+                      quality >= 0.2 ? '#ff9800' : '#f44336',
         }}
       >
         <HomeIcon 
@@ -96,6 +146,13 @@ interface HousingGridProps {
     occupants: number;
     rent: number;
     is_occupied: boolean;
+    quality?: number;
+    lastRenovation?: number;
+    household?: {
+      income: number;
+      satisfaction: number;
+      size: number;
+    };
   }>;
 }
 
@@ -122,6 +179,9 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
           occupants={unit.occupants}
           rent={unit.rent}
           is_occupied={unit.is_occupied}
+          quality={unit.quality}
+          lastRenovation={unit.lastRenovation}
+          household={unit.household}
         />
       ))}
     </Box>

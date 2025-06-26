@@ -46,6 +46,7 @@ class SimulationParams(BaseModel):
     initial_households: int = 20
     migration_rate: float = 0.1
     years: int = 10
+    rent_cap_enabled: bool = False
     # Future: scenario, policies, etc.
 
 

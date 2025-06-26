@@ -5,13 +5,25 @@ interface Unit {
   occupants: number;
   rent: number;
   is_occupied: boolean;
+  quality?: number;
+  lastRenovation?: number;
+  household?: {
+    income: number;
+    satisfaction: number;
+    size: number;
+  };
 }
 
 interface Frame {
-  units: Unit[];
-  unhoused: number;
   year: number;
   period: number;
+  units: Unit[];
+  metrics: {
+    total_units: number;
+    occupied_units: number;
+    average_rent: number;
+    total_population: number;
+  };
 }
 
 interface SimulationStats {
@@ -21,45 +33,40 @@ interface SimulationStats {
   totalResidents: number;
 }
 
+interface SimulationParams {
+  initial_households?: number;
+  migration_rate?: number;
+  years?: number;
+  rent_cap_enabled?: boolean;
+}
+
 const API_BASE = 'http://localhost:8000';
 
-const useSimulation = () => {
+export default function useSimulation() {
   const [frame, setFrame] = useState<Frame | null>(null);
-  const [status, setStatus] = useState<'idle' | 'running' | 'paused' | 'error'>('idle');
+  const [isRunning, setIsRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'running' | 'paused' | 'error'>('idle');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
 
-  // Compute derived state
-  const isRunning = status === 'running';
-  const isPaused = status === 'paused';
+  // Compute stats from the current frame
+  const stats = useMemo(() => ({
+    totalUnits: frame?.metrics.total_units ?? 0,
+    occupiedUnits: frame?.metrics.occupied_units ?? 0,
+    averageRent: frame?.metrics.average_rent ?? 0,
+    totalResidents: frame?.metrics.total_population ?? 0,
+  }), [frame]);
+
+  // Current simulation time
+  const currentYear = frame?.year ?? 1;
+  const currentPeriod = frame?.period ?? 1;
 
   // Process units data for the housing grid
   const units = useMemo(() => {
     if (!frame) return [];
-    return frame.units || [];
-  }, [frame]);
-
-  // Calculate simulation statistics
-  const stats = useMemo(() => {
-    if (!frame) return {
-      totalUnits: 0,
-      occupiedUnits: 0,
-      averageRent: 0,
-      totalResidents: 0,
-    };
-
-    const totalUnits = frame.units?.length || 0;
-    const occupiedUnits = frame.units?.filter(u => u.occupants > 0).length || 0;
-    const totalRent = frame.units?.reduce((sum, u) => sum + u.rent, 0) || 0;
-    const totalResidents = frame.units?.reduce((sum, u) => sum + u.occupants, 0) || 0;
-    
-    return {
-      totalUnits,
-      occupiedUnits,
-      averageRent: totalUnits ? Math.round(totalRent / totalUnits) : 0,
-      totalResidents,
-    };
+    return frame.units;
   }, [frame]);
 
   // WebSocket connection management
@@ -78,22 +85,36 @@ const useSimulation = () => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'paused') {
+          setIsPaused(true);
           setStatus('paused');
+          setIsRunning(false);
         } else if (data.type === 'resumed') {
+          setIsPaused(false);
           setStatus('running');
+          setIsRunning(true);
         } else if (data.type === 'complete') {
+          setIsPaused(false);
+          setIsRunning(false);
           setStatus('idle');
           setTaskId(null);
         } else if (data.type === 'error') {
           setError(data.message);
           setStatus('error');
+          setIsRunning(false);
+          setIsPaused(false);
         } else {
           setFrame(data);
+          if (!isRunning) {
+            setIsRunning(true);
+            setStatus('running');
+          }
         }
       } catch (err) {
         console.error('Error parsing WebSocket message:', err);
         setError('Error parsing simulation data');
         setStatus('error');
+        setIsRunning(false);
+        setIsPaused(false);
       }
     };
 
@@ -122,22 +143,27 @@ const useSimulation = () => {
         ws.close();
       }
       if (taskId) {
-        fetch(`${API_BASE}/simulation/stop/${taskId}`, { method: 'POST' }).catch(console.error);
+        fetch(`${API_BASE}/simulation/${taskId}/control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset' })
+        }).catch(console.error);
       }
     };
   }, [ws, taskId]);
 
   // API actions
-  const startSimulation = useCallback(async () => {
+  const startSimulation = useCallback(async (params: SimulationParams = {}) => {
     try {
       setError(null);
       const response = await fetch(`${API_BASE}/simulation/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          initial_households: 20,
-          migration_rate: 0.1,
-          years: 10
+          initial_households: params.initial_households ?? 20,
+          migration_rate: params.migration_rate ?? 0.1,
+          years: params.years ?? 10,
+          rent_cap_enabled: params.rent_cap_enabled ?? false,
         })
       });
 
@@ -167,7 +193,9 @@ const useSimulation = () => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      setIsPaused(true);
       setStatus('paused');
+      setIsRunning(false);
     } catch (err) {
       console.error('Failed to pause simulation:', err);
       setError(err instanceof Error ? err.message : 'Failed to pause simulation');
@@ -186,7 +214,9 @@ const useSimulation = () => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      setIsPaused(false);
       setStatus('running');
+      setIsRunning(true);
     } catch (err) {
       console.error('Failed to resume simulation:', err);
       setError(err instanceof Error ? err.message : 'Failed to resume simulation');
@@ -217,18 +247,61 @@ const useSimulation = () => {
     }
   }, [taskId, ws]);
 
+  // Update the processMessage function to handle the new data
+  const processMessage = useCallback((message: string) => {
+    try {
+      const data = JSON.parse(message);
+
+      if (data.type === 'error') {
+        setError(data.message);
+        setStatus('error');
+        setIsRunning(false);
+        return;
+      }
+
+      if (data.type === 'complete') {
+        setIsRunning(false);
+        setStatus('idle');
+        return;
+      }
+
+      if (data.type === 'paused') {
+        setIsPaused(true);
+        setStatus('paused');
+        return;
+      }
+
+      if (data.type === 'resumed') {
+        setIsPaused(false);
+        setStatus('running');
+        return;
+      }
+
+      // Regular frame update
+      setFrame(data);
+      setError(null);
+      setStatus('running');
+
+    } catch (e) {
+      console.error('Error processing message:', e);
+      setError('Error processing simulation data');
+      setStatus('error');
+    }
+  }, []);
+
   return {
     units,
+    frame,
     stats,
     isRunning,
     isPaused,
     error,
     status,
+    currentYear,
+    currentPeriod,
     startSimulation,
     pauseSimulation,
     resumeSimulation,
     resetSimulation,
   };
-};
-
-export default useSimulation; 
+} 

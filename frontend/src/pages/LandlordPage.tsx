@@ -57,8 +57,25 @@ const StyledSlider = styled(Slider)(({ theme }) => ({
 
 const ChartContainer = styled(Box)(({ theme }) => ({
   width: '100%',
-  height: '400px', // Increased height
-  marginBottom: theme.spacing(4),
+  height: '300px',
+  marginBottom: theme.spacing(2),
+  '& .recharts-wrapper': {
+    width: '100% !important',
+    height: '100% !important',
+  },
+}));
+
+const MetricBox = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: theme.spacing(2),
+  '& > *': {
+    borderBottom: `1px solid ${theme.palette.divider}`,
+    paddingBottom: theme.spacing(2),
+    '&:last-child': {
+      borderBottom: 'none',
+    },
+  },
 }));
 
 const MetricTooltip = styled(({ title, children, ...props }: { 
@@ -137,16 +154,7 @@ function LandlordPage() {
 
             <TextField
               fullWidth
-              label="Number of Units"
-              type="number"
-              value={inputs.numUnits}
-              onChange={handleInputChange('numUnits')}
-              margin="normal"
-            />
-
-            <TextField
-              fullWidth
-              label="Purchase Price per Unit (€)"
+              label="Purchase Price (€)"
               type="number"
               value={inputs.purchasePrice}
               onChange={handleInputChange('purchasePrice')}
@@ -408,34 +416,28 @@ function LandlordPage() {
               <Typography variant="h6" gutterBottom>
                 Investment Metrics
               </Typography>
-              <Grid container spacing={4}>
-                <Grid item xs={12} md={6}>
-                  <Box component="div">
-                    <MetricTooltip title="Annual cash flow divided by total investment">
-                      <Typography>Cash on Cash Return: {formatPercent(results.cashOnCashReturn)}</Typography>
-                    </MetricTooltip>
-                    <MetricTooltip title="Net operating income divided by property value">
-                      <Typography>Cap Rate: {formatPercent(results.capRate)}</Typography>
-                    </MetricTooltip>
-                    <MetricTooltip title="Property price divided by annual gross income">
-                      <Typography>Gross Rent Multiplier: {results.grossRentMultiplier.toFixed(2)}x</Typography>
-                    </MetricTooltip>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Box component="div">
-                    <MetricTooltip title="Net operating income divided by debt service">
-                      <Typography>Debt Coverage Ratio: {results.debtServiceCoverageRatio.toFixed(2)}</Typography>
-                    </MetricTooltip>
-                    <MetricTooltip title="Required occupancy rate to cover expenses">
-                      <Typography>Break-even Occupancy: {formatPercent(results.breakEvenOccupancy)}</Typography>
-                    </MetricTooltip>
-                    <MetricTooltip title="Months needed to recover initial investment">
-                      <Typography>Break-even Period: {results.riskMetrics.breakEvenMonths} months</Typography>
-                    </MetricTooltip>
-                  </Box>
-                </Grid>
-              </Grid>
+              {results && (
+                <MetricBox>
+                  <MetricTooltip title="Annual cash flow divided by total investment">
+                    <Typography>Cash on Cash Return: {formatPercent(results.cashOnCashReturn)}</Typography>
+                  </MetricTooltip>
+                  <MetricTooltip title="Net operating income divided by property value">
+                    <Typography>Cap Rate: {formatPercent(results.capRate)}</Typography>
+                  </MetricTooltip>
+                  <MetricTooltip title="Property price divided by annual gross income">
+                    <Typography>Gross Rent Multiplier: {results.grossRentMultiplier.toFixed(2)}x</Typography>
+                  </MetricTooltip>
+                  <MetricTooltip title="Net operating income divided by debt service">
+                    <Typography>Debt Coverage Ratio: {results.debtServiceCoverageRatio.toFixed(2)}</Typography>
+                  </MetricTooltip>
+                  <MetricTooltip title="Required occupancy rate to cover expenses">
+                    <Typography>Break-even Occupancy: {formatPercent(results.breakEvenOccupancy)}</Typography>
+                  </MetricTooltip>
+                  <MetricTooltip title="Months needed to recover initial investment">
+                    <Typography>Break-even Period: {results.riskMetrics.breakEvenMonths} months</Typography>
+                  </MetricTooltip>
+                </MetricBox>
+              )}
             </Paper>
 
             {/* Risk Analysis */}
@@ -454,125 +456,120 @@ function LandlordPage() {
               <Typography variant="h6" gutterBottom>
                 30-Year Projection
               </Typography>
-              <Grid container spacing={4}>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom>Property Value & Equity Growth</Typography>
-                  <ChartContainer>
-                    <ResponsiveContainer>
-                      <AreaChart data={results.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="year" 
-                          label={{ value: 'Year', position: 'bottom', offset: -10 }}
-                        />
-                        <YAxis 
-                          label={{ value: 'Value (€)', angle: -90, position: 'insideLeft', offset: 10 }}
-                          tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
-                        />
-                        <RechartsTooltip 
-                          formatter={(value: number) => formatCurrency(value)}
-                          labelFormatter={(label) => `Year ${label}`}
-                        />
-                        <Legend verticalAlign="top" height={36} />
-                        <Area 
-                          type="monotone" 
-                          dataKey="propertyValue" 
-                          name="Property Value" 
-                          fill="#8884d8" 
-                          stroke="#8884d8" 
-                          fillOpacity={0.3}
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="equity" 
-                          name="Equity" 
-                          fill="#82ca9d" 
-                          stroke="#82ca9d" 
-                          fillOpacity={0.3}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom>Annual Cash Flow & NOI</Typography>
-                  <ChartContainer>
-                    <ResponsiveContainer>
-                      <LineChart data={results.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="year" 
-                          label={{ value: 'Year', position: 'bottom', offset: -10 }}
-                        />
-                        <YAxis 
-                          label={{ value: 'Amount (€)', angle: -90, position: 'insideLeft', offset: 10 }}
-                          tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
-                        />
-                        <RechartsTooltip 
-                          formatter={(value: number) => formatCurrency(value)}
-                          labelFormatter={(label) => `Year ${label}`}
-                        />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line 
-                          type="monotone" 
-                          dataKey="cashFlow" 
-                          name="Cash Flow" 
-                          stroke="#2ecc71" 
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="netOperatingIncome" 
-                          name="NOI" 
-                          stroke="#3498db" 
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom>Operating Metrics</Typography>
-                  <ChartContainer>
-                    <ResponsiveContainer>
-                      <LineChart data={results.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="year" 
-                          label={{ value: 'Year', position: 'bottom', offset: -10 }}
-                        />
-                        <YAxis 
-                          label={{ value: 'Percentage (%)', angle: -90, position: 'insideLeft', offset: 10 }}
-                          domain={[0, 100]}
-                        />
-                        <RechartsTooltip 
-                          formatter={(value: number) => `${value.toFixed(1)}%`}
-                          labelFormatter={(label) => `Year ${label}`}
-                        />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line 
-                          type="monotone" 
-                          dataKey="operatingExpenseRatio" 
-                          name="Expense Ratio" 
-                          stroke="#e74c3c" 
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="debtCoverageRatio" 
-                          name="DSCR" 
-                          stroke="#f39c12" 
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </Grid>
-              </Grid>
+              
+              <Typography variant="subtitle1" gutterBottom>Property Value & Equity Growth</Typography>
+              <ChartContainer>
+                <ResponsiveContainer>
+                  <AreaChart data={results?.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="year" 
+                      label={{ value: 'Year', position: 'bottom', offset: -10 }}
+                    />
+                    <YAxis 
+                      label={{ value: 'Value (€)', angle: -90, position: 'insideLeft', offset: 10 }}
+                      tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                    />
+                    <RechartsTooltip 
+                      formatter={(value: number) => formatCurrency(value)}
+                      labelFormatter={(label) => `Year ${label}`}
+                    />
+                    <Legend verticalAlign="top" height={36} />
+                    <Area 
+                      type="monotone" 
+                      dataKey="propertyValue" 
+                      name="Property Value" 
+                      fill="#8884d8" 
+                      stroke="#8884d8" 
+                      fillOpacity={0.3}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="equity" 
+                      name="Equity" 
+                      fill="#82ca9d" 
+                      stroke="#82ca9d" 
+                      fillOpacity={0.3}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+
+              <Typography variant="subtitle1" gutterBottom sx={{ mt: 4 }}>Annual Cash Flow & NOI</Typography>
+              <ChartContainer>
+                <ResponsiveContainer>
+                  <LineChart data={results?.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="year" 
+                      label={{ value: 'Year', position: 'bottom', offset: -10 }}
+                    />
+                    <YAxis 
+                      label={{ value: 'Amount (€)', angle: -90, position: 'insideLeft', offset: 10 }}
+                      tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                    />
+                    <RechartsTooltip 
+                      formatter={(value: number) => formatCurrency(value)}
+                      labelFormatter={(label) => `Year ${label}`}
+                    />
+                    <Legend verticalAlign="top" height={36} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="cashFlow" 
+                      name="Cash Flow" 
+                      stroke="#2ecc71" 
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="netOperatingIncome" 
+                      name="NOI" 
+                      stroke="#3498db" 
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+
+              <Typography variant="subtitle1" gutterBottom sx={{ mt: 4 }}>Operating Metrics</Typography>
+              <ChartContainer>
+                <ResponsiveContainer>
+                  <LineChart data={results?.yearlyData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="year" 
+                      label={{ value: 'Year', position: 'bottom', offset: -10 }}
+                    />
+                    <YAxis 
+                      label={{ value: 'Percentage (%)', angle: -90, position: 'insideLeft', offset: 10 }}
+                      domain={[0, 100]}
+                    />
+                    <RechartsTooltip 
+                      formatter={(value: number) => `${value.toFixed(1)}%`}
+                      labelFormatter={(label) => `Year ${label}`}
+                    />
+                    <Legend verticalAlign="top" height={36} />
+                    <Line 
+                      type="monotone" 
+                      dataKey="operatingExpenseRatio" 
+                      name="Expense Ratio" 
+                      stroke="#e74c3c" 
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="debtCoverageRatio" 
+                      name="DSCR" 
+                      stroke="#f39c12" 
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
             </Paper>
 
             {/* Yearly Breakdown Table */}
@@ -608,65 +605,56 @@ function LandlordPage() {
               </Box>
             </Paper>
 
+            {/* Location Metrics */}
             <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
               <Typography variant="h6" gutterBottom>
-                Location Analysis
+                Location Metrics
               </Typography>
-              <Grid container spacing={4}>
-                <Grid item xs={12} md={6}>
-                  <MetricTooltip title="Ratio between property price and annual point-system rent. Lower is better.">
-                    <Typography>
-                      Price to Point-Rent Ratio: {results.locationMetrics.priceToPointRentRatio.toFixed(1)}x
-                    </Typography>
-                  </MetricTooltip>
-                  <MetricTooltip title="How much higher market rent could be compared to point system rent">
-                    <Typography>
-                      Market Rent Premium: {results.locationMetrics.marketRentPremium.toFixed(1)}%
-                    </Typography>
-                  </MetricTooltip>
-                  <MetricTooltip title="Return on investment relative to location average">
-                    <Typography>
-                      Relative ROI: {results.locationMetrics.relativeROI.toFixed(1)}%
-                    </Typography>
-                  </MetricTooltip>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <MetricTooltip title="Overall profitability score considering location factors">
-                    <Typography>
-                      Location Profitability Score: {results.locationMetrics.locationProfitabilityScore.toFixed(1)}
-                    </Typography>
-                  </MetricTooltip>
-                  <MetricTooltip title="How much the point system affects profitability in this location">
-                    <Typography>
-                      Point System Impact: {results.locationMetrics.pointSystemImpact.toFixed(1)}%
-                    </Typography>
-                  </MetricTooltip>
-                </Grid>
-              </Grid>
+              {results && (
+                <>
+                  <MetricBox>
+                    <MetricTooltip title="Ratio of property price to annual rent based on point system">
+                      <Typography>Price to Point-Rent Ratio: {results.locationMetrics.priceToPointRentRatio.toFixed(1)}x</Typography>
+                    </MetricTooltip>
+                    <MetricTooltip title="How much higher the market rent is compared to point system rent">
+                      <Typography>Market Rent Premium: {formatPercent(results.locationMetrics.marketRentPremium)}</Typography>
+                    </MetricTooltip>
+                    <MetricTooltip title="Return on investment compared to market average">
+                      <Typography>Relative ROI: {formatPercent(results.locationMetrics.relativeROI)}</Typography>
+                    </MetricTooltip>
+                    <MetricTooltip title="Overall profitability score for this location">
+                      <Typography>Location Profitability Score: {results.locationMetrics.locationProfitabilityScore.toFixed(1)}</Typography>
+                    </MetricTooltip>
+                    <MetricTooltip title="Impact of the point system on potential returns">
+                      <Typography>Point System Impact: {results.locationMetrics.pointSystemImpact.toFixed(1)}</Typography>
+                    </MetricTooltip>
+                  </MetricBox>
 
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Point System Impact
-                </Typography>
-                <LinearProgress
-                  variant="determinate"
-                  value={results.locationMetrics.pointSystemImpact}
-                  sx={{
-                    height: 10,
-                    borderRadius: 5,
-                    backgroundColor: '#e0e0e0',
-                    '& .MuiLinearProgress-bar': {
-                      backgroundColor: results.locationMetrics.pointSystemImpact > 70 ? '#f44336' :
-                                     results.locationMetrics.pointSystemImpact > 40 ? '#ff9800' : '#4caf50',
-                    },
-                  }}
-                />
-                <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-                  {results.locationMetrics.pointSystemImpact > 70 ? 'High impact - Point system significantly limits profitability' :
-                   results.locationMetrics.pointSystemImpact > 40 ? 'Medium impact - Point system moderately affects returns' :
-                   'Low impact - Point system has minimal effect on returns'}
-                </Typography>
-              </Box>
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Point System Impact
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={results.locationMetrics.pointSystemImpact}
+                      sx={{
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: '#e0e0e0',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: results.locationMetrics.pointSystemImpact > 70 ? '#f44336' :
+                                         results.locationMetrics.pointSystemImpact > 40 ? '#ff9800' : '#4caf50',
+                        },
+                      }}
+                    />
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                      {results.locationMetrics.pointSystemImpact > 70 ? 'High impact - Point system significantly limits profitability' :
+                       results.locationMetrics.pointSystemImpact > 40 ? 'Medium impact - Point system moderately affects returns' :
+                       'Low impact - Point system has minimal effect on returns'}
+                    </Typography>
+                  </Box>
+                </>
+              )}
             </Paper>
           </Grid>
         )}

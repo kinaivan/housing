@@ -50,8 +50,10 @@ def _serialize_frame(frame: Dict) -> str:
                 "id": idx + 1,
                 "occupants": unit.get_total_household_size() if hasattr(unit, "get_total_household_size") else 0,
                 "rent": int(unit.rent) if hasattr(unit, "rent") else 0,
-                "is_occupied": bool(unit.household) if hasattr(unit, "household") else False,
-                "household": household_info
+                "is_occupied": bool(unit.occupied) if hasattr(unit, "occupied") else False,
+                "quality": float(unit.quality) if hasattr(unit, "quality") else 0.0,
+                "lastRenovation": int(unit.last_renovation) if hasattr(unit, "last_renovation") else 0,
+                "household": household_info if household_info else None
             })
 
     # Calculate additional metrics
@@ -72,7 +74,6 @@ def _serialize_frame(frame: Dict) -> str:
     data = {
         "year": frame.get("year"),
         "period": frame.get("period"),
-        "unhoused": frame.get("unhoused"),
         "metrics": metrics,
         "units": units_data
     }
@@ -105,9 +106,15 @@ def run_simulation(task_id: str, params: Dict):
         init_households = params.get("initial_households", 20)
         migration_rate = params.get("migration_rate", 0.1)
         years = params.get("years", 10)
+        rent_cap_enabled = params.get("rent_cap_enabled", False)
 
         # Initialise the simulation using the existing helper.
-        sim = initialize_simulation(initial_households=init_households, migration_rate=migration_rate)
+        sim = initialize_simulation(
+            initial_households=init_households,
+            migration_rate=migration_rate,
+            years=years,
+            rent_cap_enabled=rent_cap_enabled
+        )
 
         channel = f"{CHANNEL_PREFIX}{task_id}"
 

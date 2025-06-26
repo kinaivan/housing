@@ -33,6 +33,7 @@ def initialize_simulation(
     initial_households: int = 20,
     migration_rate: float = 0.1,
     years: int = 10,
+    rent_cap_enabled: bool = False,
 ) -> RealtimeSimulation:
     """Create a fresh `RealtimeSimulation` populated with demo data.
 
@@ -44,6 +45,8 @@ def initialize_simulation(
         Stored on the resulting simulation object for later reference.
     years : int
         Number of years (12 periods each) that the simulation will run.
+    rent_cap_enabled : bool
+        Whether to enable rent cap policy.
     """
     # Households / landlords / units ----------------------------------------------------------------
     households: List[Household] = [create_household(i) for i in range(initial_households)]
@@ -53,7 +56,7 @@ def initialize_simulation(
     landlords[0].units = units
 
     rental_market = RentalMarket(units=units)
-    policy = RentCapPolicy()
+    policy = RentCapPolicy() if rent_cap_enabled else None
 
     sim = RealtimeSimulation(households, landlords, rental_market, policy, years)
 
@@ -61,5 +64,6 @@ def initialize_simulation(
     setattr(sim, "migration_rate", migration_rate)
     sim.last_initial_households = initial_households
     sim.last_migration_rate = migration_rate
+    sim.rent_cap_enabled = rent_cap_enabled
 
     return sim 

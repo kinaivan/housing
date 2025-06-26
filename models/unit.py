@@ -229,9 +229,14 @@ class Landlord:
                 desired_rent = unit.rent * (1 + total_adjustment)
                 
                 # Apply policy limits for compliant landlords
-                if self.is_compliant:
+                if self.is_compliant and policy is not None:
                     max_increase = policy.max_increase_rate
                     # Policy typically only limits increases, not decreases
+                    if total_adjustment > 0:
+                        desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
+                elif self.is_compliant:
+                    # Default max increase rate when no policy is in effect
+                    max_increase = 0.10  # 10% default max increase
                     if total_adjustment > 0:
                         desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
             
