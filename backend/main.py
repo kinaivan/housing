@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal
@@ -69,12 +69,22 @@ async def start_simulation(params: SimulationParams):
     return {"simulation_id": simulation_id}
 
 
-@app.post("/simulation/{simulation_id}/control")
-async def control_simulation(simulation_id: str, control: SimulationControl):
-    """Control a running simulation (pause/resume/reset)."""
-    control_channel = f"{CONTROL_PREFIX}{simulation_id}"
-    await redis_client.set(control_channel, control.action)
-    return {"status": "success", "action": control.action}
+@app.post("/simulation/{task_id}/control")
+async def control_simulation(task_id: str, control: dict):
+    action = control.get("action")
+    if action not in ["pause", "resume", "reset", "seek"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+    
+    # Use the existing redis_client instance
+    if action == "seek":
+        step = control.get("step")
+        if step is None:
+            raise HTTPException(status_code=400, detail="Step parameter required for seek action")
+        await redis_client.set(f"sim:{task_id}:control", f"seek:{step}")
+    else:
+        await redis_client.set(f"sim:{task_id}:control", action)
+    
+    return {"status": "ok"}
 
 
 @app.get("/simulation/status/{simulation_id}")

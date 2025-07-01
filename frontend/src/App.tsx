@@ -14,6 +14,7 @@ import SimulationPage from './pages/SimulationPage';
 import LandlordPage from './pages/LandlordPage';
 import AboutPage from './pages/AboutPage';
 import PropertyDetailPage from './pages/PropertyDetailPage';
+import ScenarioPage from './pages/ScenarioPage';
 
 // Theme colors
 const colors = {
@@ -59,7 +60,7 @@ function App() {
               sx={{
                 color: colors.textDark,
                 textDecoration: 'none',
-                borderBottom: isActive('/simulation') ? `2px solid ${colors.textDark}` : 'none',
+                borderBottom: isActive('/simulation') || isActive('/') ? `2px solid ${colors.textDark}` : 'none',
                 pb: 0.5,
                 fontWeight: 500,
                 '&:hover': {
@@ -111,7 +112,7 @@ function App() {
           <Route path="/property/:id" element={<PropertyDetailPage />} />
           <Route path="/landlord" element={<LandlordPage />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="*" element={<Navigate to="/simulation" replace />} />
+          <Route path="/" element={<Navigate to="/simulation" replace />} />
         </Routes>
       </Container>
     </>

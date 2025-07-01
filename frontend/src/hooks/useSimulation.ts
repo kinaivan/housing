@@ -76,9 +76,26 @@ export default function useSimulation() {
     }
 
     const newWs = new WebSocket(`ws://localhost:8000/simulation/stream/${newTaskId}`);
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+    const reconnectDelay = 1000; // 1 second
+
+    const reconnect = () => {
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        setTimeout(() => {
+          console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
+          connectWebSocket(newTaskId);
+        }, reconnectDelay * reconnectAttempts);
+      } else {
+        setError('Failed to connect to simulation server after multiple attempts');
+        setStatus('error');
+      }
+    };
 
     newWs.onopen = () => {
       console.log('WebSocket connected');
+      reconnectAttempts = 0; // Reset reconnect attempts on successful connection
     };
 
     newWs.onmessage = (event) => {
@@ -104,10 +121,8 @@ export default function useSimulation() {
           setIsPaused(false);
         } else {
           setFrame(data);
-          if (!isRunning) {
-            setIsRunning(true);
-            setStatus('running');
-          }
+          setError(null); // Clear any previous errors
+          // Don't automatically change state - only explicit control messages should do that
         }
       } catch (err) {
         console.error('Error parsing WebSocket message:', err);
@@ -122,19 +137,34 @@ export default function useSimulation() {
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
       setStatus('error');
+      reconnect();
     };
 
-    newWs.onclose = () => {
-      console.log('WebSocket closed');
-      if (status === 'running') {
+    newWs.onclose = (event) => {
+      console.log('WebSocket closed', event.code, event.reason);
+      // Only treat as unexpected if we're actively running and it wasn't a clean close
+      if ((status === 'running' || isRunning) && event.code !== 1000) {
         setError('WebSocket connection closed unexpectedly');
         setStatus('error');
+        reconnect();
       }
     };
 
     setWs(newWs);
     return newWs;
-  }, [ws, status]);
+  }, [ws, status, isRunning]);
+
+  // Synchronize isRunning with status
+  useEffect(() => {
+    if (status === 'running' && !isRunning && !isPaused) {
+      setIsRunning(true);
+    } else if (status === 'paused' && isRunning) {
+      setIsRunning(false);
+    } else if (status === 'idle' && (isRunning || isPaused)) {
+      setIsRunning(false);
+      setIsPaused(false);
+    }
+  }, [status, isRunning, isPaused]);
 
   // Cleanup WebSocket on unmount
   useEffect(() => {
@@ -174,17 +204,24 @@ export default function useSimulation() {
       const { simulation_id } = await response.json();
       setTaskId(simulation_id);
       setStatus('running');
+      setIsRunning(true);  // Set isRunning to true when starting
+      setIsPaused(false);  // Make sure paused is false
       connectWebSocket(simulation_id);
     } catch (err) {
       console.error('Failed to start simulation:', err);
       setError(err instanceof Error ? err.message : 'Failed to start simulation');
       setStatus('error');
+      throw err; // Re-throw to handle in the component
     }
   }, [connectWebSocket]);
 
   const pauseSimulation = useCallback(async () => {
-    if (!taskId) return;
+    if (!taskId) {
+      console.log('No taskId available for pause');
+      return;
+    }
     try {
+      console.log('Sending pause signal for task:', taskId);
       const response = await fetch(`${API_BASE}/simulation/${taskId}/control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,6 +230,7 @@ export default function useSimulation() {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+      console.log('Pause signal sent successfully');
       setIsPaused(true);
       setStatus('paused');
       setIsRunning(false);
@@ -225,27 +263,58 @@ export default function useSimulation() {
   }, [taskId]);
 
   const resetSimulation = useCallback(async () => {
-    if (!taskId) return;
     try {
-      const response = await fetch(`${API_BASE}/simulation/${taskId}/control`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reset' })
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // Reset local state first
+      setIsRunning(false);
+      setIsPaused(false);
+      setFrame(null);
+      setError(null);
       setStatus('idle');
-      setTaskId(null);
+      
+      // Close WebSocket connection
       if (ws) {
         ws.close();
+        setWs(null);
       }
+      
+      // Send reset signal to backend if there's an active task
+      if (taskId) {
+        const response = await fetch(`${API_BASE}/simulation/${taskId}/control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset' })
+        });
+        if (!response.ok) {
+          console.warn(`Reset request failed with status: ${response.status}`);
+        }
+      }
+      
+      // Clear task ID last
+      setTaskId(null);
     } catch (err) {
       console.error('Failed to reset simulation:', err);
       setError(err instanceof Error ? err.message : 'Failed to reset simulation');
       setStatus('error');
     }
   }, [taskId, ws]);
+
+  const seekToStep = useCallback(async (step: number) => {
+    if (!taskId) return;
+    try {
+      const response = await fetch(`${API_BASE}/simulation/${taskId}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'seek', step })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+    } catch (err) {
+      console.error('Failed to seek simulation:', err);
+      setError(err instanceof Error ? err.message : 'Failed to seek simulation');
+      setStatus('error');
+    }
+  }, [taskId]);
 
   // Update the processMessage function to handle the new data
   const processMessage = useCallback((message: string) => {
@@ -266,21 +335,25 @@ export default function useSimulation() {
       }
 
       if (data.type === 'paused') {
+        console.log('Received paused message from backend');
         setIsPaused(true);
         setStatus('paused');
+        setIsRunning(false);
         return;
       }
 
       if (data.type === 'resumed') {
+        console.log('Received resumed message from backend');
         setIsPaused(false);
         setStatus('running');
+        setIsRunning(true);
         return;
       }
 
       // Regular frame update
       setFrame(data);
       setError(null);
-      setStatus('running');
+      // Don't automatically set status to running - preserve paused state
 
     } catch (e) {
       console.error('Error processing message:', e);
@@ -303,5 +376,6 @@ export default function useSimulation() {
     pauseSimulation,
     resumeSimulation,
     resetSimulation,
+    seekToStep,
   };
 } 

@@ -10,6 +10,7 @@ import {
   CircularProgress,
   Switch,
   FormControlLabel,
+  Slider,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -31,19 +32,15 @@ function Timeline({
   currentStep, 
   totalSteps, 
   currentYear, 
-  currentPeriod 
+  currentPeriod,
 }: { 
   currentStep: number; 
   totalSteps: number;
   currentYear: number;
   currentPeriod: number;
 }) {
-  // Create markers for every 5 years (10 steps)
-  const markers = Array.from({ length: 7 }, (_, i) => i * 5);
-  
-  // Calculate the actual step (0-based) and ensure it only increases
-  const actualStep = Math.max(0, ((currentYear - 1) * 2) + (currentPeriod - 1));
-  const fillPercentage = Math.min(100, (actualStep / totalSteps) * 100);
+  // Create markers for every 5 years
+  const yearMarkers = [0, 5, 10, 15, 20, 25, 30];
   
   return (
     <Box sx={{ width: '100%', mb: 3 }}>
@@ -51,62 +48,49 @@ function Timeline({
         <Typography variant="body2" color="text.secondary">
           Year {currentYear} of 30, Period {currentPeriod}
         </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Progress: {Math.round((currentStep / (totalSteps - 1)) * 100)}%
+        </Typography>
       </Box>
-      <Box sx={{ position: 'relative', height: '40px', mb: 1 }}>
-        {/* Background track */}
-        <Box
+      <Box sx={{ position: 'relative', height: '60px', mb: 1 }}>
+        <Slider
+          value={currentStep}
+          min={0}
+          max={totalSteps - 1}
+          step={1}
+          marks={yearMarkers.map(year => ({
+            value: year * 2, // Each year has 2 periods
+            label: `${year}`
+          }))}
+          disabled
           sx={{
-            position: 'absolute',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: '100%',
-            height: '8px',
-            backgroundColor: colors.yellowLight,
-            borderRadius: '4px',
+            '& .MuiSlider-rail': {
+              backgroundColor: colors.yellowLight,
+              height: 8,
+            },
+            '& .MuiSlider-track': {
+              backgroundColor: colors.yellowDark,
+              height: 8,
+            },
+            '& .MuiSlider-thumb': {
+              backgroundColor: colors.yellowDark,
+              width: 20,
+              height: 20,
+              '&.Mui-disabled': {
+                backgroundColor: colors.yellowDark,
+              },
+            },
+            '& .MuiSlider-mark': {
+              backgroundColor: colors.textDark,
+              height: 12,
+              width: 2,
+            },
+            '& .MuiSlider-markLabel': {
+              fontSize: '0.75rem',
+              color: colors.textDark,
+            },
           }}
         />
-        {/* Progress bar */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: `${fillPercentage}%`,
-            height: '8px',
-            backgroundColor: colors.yellowDark,
-            borderRadius: '4px',
-            transition: 'width 2s ease-in-out',
-          }}
-        />
-        {/* Year markers */}
-        {markers.map((year) => (
-          <Box
-            key={year}
-            sx={{
-              position: 'absolute',
-              left: `${(year / 30) * 100}%`,
-              top: 0,
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              transform: 'translateX(-50%)',
-            }}
-          >
-            <Box
-              sx={{
-                width: '2px',
-                height: '12px',
-                backgroundColor: colors.textDark,
-                opacity: 0.3,
-                mb: 0.5,
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              Year {year}
-            </Typography>
-          </Box>
-        ))}
       </Box>
     </Box>
   );
@@ -143,6 +127,7 @@ function StatCard({ title, value, subtitle }: { title: string; value: string | n
 
 function SimulationPage() {
   const [rentCapEnabled, setRentCapEnabled] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const {
     units,
     stats,
@@ -156,44 +141,57 @@ function SimulationPage() {
     pauseSimulation,
     resumeSimulation,
     resetSimulation,
+    seekToStep
   } = useSimulation();
 
   // Calculate current step (0-based)
   const totalSteps = 60; // 30 years * 2 periods per year
   const currentStep = ((currentYear - 1) * 2) + (currentPeriod - 1);
 
-  // Start simulation automatically when the page loads
-  useEffect(() => {
-    if (status === 'idle') {
-      startSimulation({ 
-        rent_cap_enabled: rentCapEnabled,
-        years: 30
-      });
-    }
-  }, [status, startSimulation, rentCapEnabled]);
-
-  const handlePlayPause = () => {
+  const handlePlayPause = async () => {
     if (isPaused) {
       resumeSimulation();
     } else if (isRunning) {
       pauseSimulation();
-    } else {
-      startSimulation({ 
-        rent_cap_enabled: rentCapEnabled,
-        years: 30
-      });
+    } else if (!isStarting) {
+      setIsStarting(true);
+      try {
+        await startSimulation({ 
+          rent_cap_enabled: rentCapEnabled,
+          years: 30
+        });
+      } catch (err) {
+        console.error('Failed to start simulation:', err);
+      } finally {
+        setIsStarting(false);
+      }
     }
   };
 
-  const handleRentCapToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReset = async () => {
+    try {
+      await resetSimulation();
+    } catch (err) {
+      console.error('Failed to reset simulation:', err);
+    }
+  };
+
+  const handleRentCapToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     setRentCapEnabled(event.target.checked);
     if (isRunning || isPaused) {
-      resetSimulation();
-      setTimeout(() => {
-        startSimulation({ 
-          rent_cap_enabled: event.target.checked,
-          years: 30
-        });
+      await resetSimulation();
+      setTimeout(async () => {
+        setIsStarting(true);
+        try {
+          await startSimulation({ 
+            rent_cap_enabled: event.target.checked,
+            years: 30
+          });
+        } catch (err) {
+          console.error('Failed to start simulation:', err);
+        } finally {
+          setIsStarting(false);
+        }
       }, 500);
     }
   };
@@ -209,11 +207,27 @@ function SimulationPage() {
           Watch how housing units evolve over time (6-month intervals)
         </Typography>
 
+        {/* Error Display */}
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+
+
+        {/* Loading State */}
+        {isStarting && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
         {/* Timeline */}
-        {isRunning && (
+        {(isRunning || isPaused) && (
           <Timeline 
-            currentStep={((currentYear - 1) * 2) + (currentPeriod - 1)} 
-            totalSteps={60}
+            currentStep={currentStep} 
+            totalSteps={totalSteps}
             currentYear={currentYear}
             currentPeriod={currentPeriod}
           />
@@ -224,7 +238,7 @@ function SimulationPage() {
             <Button
               onClick={handlePlayPause}
               startIcon={isPaused || !isRunning ? <PlayArrowIcon /> : <PauseIcon />}
-              disabled={status === 'error'}
+              disabled={status === 'error' || isStarting}
               sx={{
                 backgroundColor: colors.yellowDark,
                 '&:hover': {
@@ -232,12 +246,12 @@ function SimulationPage() {
                 },
               }}
             >
-              {status === 'paused' ? 'Resume' : (isRunning ? 'Pause' : 'Start')}
+              {isPaused ? 'Resume' : (isRunning ? 'Pause' : 'Start')}
             </Button>
             <Button
-              onClick={resetSimulation}
+              onClick={handleReset}
               startIcon={<RestartAltIcon />}
-              disabled={status === 'error'}
+              disabled={status === 'error' || isStarting}
               sx={{
                 backgroundColor: colors.yellowDark,
                 '&:hover': {
@@ -260,20 +274,6 @@ function SimulationPage() {
           />
         </Box>
       </Box>
-
-      {/* Error Message */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 4 }}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Loading State */}
-      {status === 'running' && units.length === 0 && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
 
       {/* Statistics Grid */}
       <Box 

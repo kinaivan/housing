@@ -52,10 +52,6 @@ class RealtimeSimulation:
 
     def step(self):
         """Execute one step of the simulation and return the current state"""
-        if self.current_period > 12:
-            self.current_year += 1
-            self.current_period = 1
-            
         if self.current_year > self.simulation.years:
             return None
             
@@ -64,7 +60,13 @@ class RealtimeSimulation:
         
         # Update state and counters
         self.current_frame += 1
-        self.current_period += 1
+        
+        # Increment period (each step represents 6 months)
+        if self.current_period == 1:
+            self.current_period = 2  # First 6 months -> Second 6 months
+        else:
+            self.current_period = 1  # Second 6 months -> Next year, first 6 months
+            self.current_year += 1
         
         return self._compute_current_state()
         

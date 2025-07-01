@@ -82,7 +82,7 @@ def _serialize_frame(frame: Dict) -> str:
 
 def _check_control_signal(task_id: str) -> str:
     """Check for control signals (pause/resume/reset) for this simulation."""
-    control_channel = f"{CONTROL_PREFIX}{task_id}"
+    control_channel = f"sim:{task_id}:control"  # Match the channel name used in main.py
     signal = redis_client.get(control_channel)
     if signal:
         redis_client.delete(control_channel)  # Consume the signal
@@ -145,6 +145,32 @@ def run_simulation(task_id: str, params: Dict):
             elif signal == "resume":
                 is_paused = False
                 redis_client.publish(channel, json.dumps({"type": "resumed"}))
+            
+            elif signal is not None and signal.startswith("seek:"):
+                target_step = int(signal.split(":")[1])
+                # Get current step from the simulation
+                current_step = getattr(sim, 'current_step', 0) if hasattr(sim, 'current_step') else step
+                
+                if target_step < current_step:
+                    # If seeking backwards, we need to reset and replay
+                    sim = initialize_simulation(initial_households=init_households, migration_rate=migration_rate)
+                    current_sim_step = 0
+                else:
+                    # If seeking forwards, we can continue from current position
+                    current_sim_step = current_step
+                
+                # Run simulation to target step
+                while current_sim_step < target_step:
+                    frame = sim.step()
+                    if frame is None:
+                        break
+                    current_sim_step += 1
+                
+                if frame is not None:
+                    redis_client.publish(channel, _serialize_frame(frame))
+                is_paused = True
+                redis_client.publish(channel, json.dumps({"type": "paused"}))
+                break
 
             # If paused, wait for resume signal
             while is_paused:
@@ -159,14 +185,36 @@ def run_simulation(task_id: str, params: Dict):
                     redis_client.publish(channel, _serialize_frame(frame))
                     is_paused = False
                     break
+                elif signal is not None and signal.startswith("seek:"):
+                    target_step = int(signal.split(":")[1])
+                    # Get current step from the simulation
+                    current_step = getattr(sim, 'current_step', 0) if hasattr(sim, 'current_step') else step
+                    
+                    if target_step < current_step:
+                        # If seeking backwards, we need to reset and replay
+                        sim = initialize_simulation(initial_households=init_households, migration_rate=migration_rate)
+                        current_sim_step = 0
+                    else:
+                        # If seeking forwards, we can continue from current position
+                        current_sim_step = current_step
+                    
+                    # Run simulation to target step
+                    while current_sim_step < target_step:
+                        frame = sim.step()
+                        if frame is None:
+                            break
+                        current_sim_step += 1
+                    
+                    if frame is not None:
+                        redis_client.publish(channel, _serialize_frame(frame))
+                    is_paused = True
+                    redis_client.publish(channel, json.dumps({"type": "paused"}))
+                    break
 
             # Process next simulation step if not paused
             if not is_paused:
-                # Run 6 monthly steps for each frame
-                for _ in range(6):
-                    frame = sim.step()
-                    if frame is None:
-                        break
+                # Run one 6-month step for each frame (not 6 monthly steps)
+                frame = sim.step()
                 if frame is not None:
                     redis_client.publish(channel, _serialize_frame(frame))
                     time.sleep(2.0)  # Show each 6-month step for 2 seconds

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Container,
@@ -17,6 +17,8 @@ import {
   Select,
   MenuItem,
   SelectChangeEvent,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import type { Theme } from '@mui/material/styles';
 import type { SxProps } from '@mui/system';
@@ -36,6 +38,15 @@ import {
 } from 'recharts';
 import { useLandlordCalculator } from '../hooks/useLandlordCalculator';
 import InfoIcon from '@mui/icons-material/Info';
+import ScenarioPage from './ScenarioPage';
+
+// Theme colors
+const colors = {
+  yellowPrimary: '#FFD700',
+  yellowLight: '#FFF4B8',
+  yellowDark: '#FFC000',
+  textDark: '#2C2C2C',
+};
 
 // Create a properly typed Grid component
 const Grid = MuiGrid as React.ComponentType<{
@@ -94,7 +105,7 @@ const MetricTooltip = styled(({ title, children, ...props }: {
 }));
 
 const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('nl-NL', {
     style: 'currency',
     currency: 'EUR',
     minimumFractionDigits: 0,
@@ -102,8 +113,12 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatPercent = (value: number) => {
-  return `${value.toFixed(1)}%`;
+const formatPercentage = (value: number) => {
+  return new Intl.NumberFormat('nl-NL', {
+    style: 'percent',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(value / 100);
 };
 
 const RiskIndicator: React.FC<{ score: number; label: string }> = ({ score, label }) => (
@@ -124,7 +139,17 @@ const RiskIndicator: React.FC<{ score: number; label: string }> = ({ score, labe
 );
 
 function LandlordPage() {
+  const [calculatorType, setCalculatorType] = useState<'scenario' | 'custom'>('scenario');
   const { inputs, results, updateInput, calculate } = useLandlordCalculator();
+
+  const handleCalculatorTypeChange = (
+    event: React.MouseEvent<HTMLElement>,
+    newType: 'scenario' | 'custom',
+  ) => {
+    if (newType !== null) {
+      setCalculatorType(newType);
+    }
+  };
 
   const handleSliderChange = (name: keyof typeof inputs) => (_event: Event, value: number | number[]) => {
     updateInput(name, value as number);
@@ -139,11 +164,96 @@ function LandlordPage() {
     updateInput('location', value);
   };
 
+  if (calculatorType === 'scenario') {
+    return (
+      <Container maxWidth="xl">
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
+          <ToggleButtonGroup
+            value={calculatorType}
+            exclusive
+            onChange={handleCalculatorTypeChange}
+            aria-label="calculator type"
+            sx={{ mb: 2 }}
+          >
+            <ToggleButton 
+              value="scenario" 
+              aria-label="scenario calculator"
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: colors.yellowPrimary,
+                  '&:hover': {
+                    backgroundColor: colors.yellowDark,
+                  },
+                },
+              }}
+            >
+              Scenario Calculator
+            </ToggleButton>
+            <ToggleButton 
+              value="custom" 
+              aria-label="custom calculator"
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: colors.yellowPrimary,
+                  '&:hover': {
+                    backgroundColor: colors.yellowDark,
+                  },
+                },
+              }}
+            >
+              Custom Calculator
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+        <ScenarioPage />
+      </Container>
+    );
+  }
+
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Typography variant="h4" gutterBottom align="center" sx={{ color: '#2c3e50' }}>
+      <Typography variant="h4" gutterBottom align="center" sx={{ color: colors.textDark }}>
         Landlord Investment Calculator
       </Typography>
+
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
+        <ToggleButtonGroup
+          value={calculatorType}
+          exclusive
+          onChange={handleCalculatorTypeChange}
+          aria-label="calculator type"
+          sx={{ mb: 2 }}
+        >
+          <ToggleButton 
+            value="scenario" 
+            aria-label="scenario calculator"
+            sx={{
+              '&.Mui-selected': {
+                backgroundColor: colors.yellowPrimary,
+                '&:hover': {
+                  backgroundColor: colors.yellowDark,
+                },
+              },
+            }}
+          >
+            Scenario Calculator
+          </ToggleButton>
+          <ToggleButton 
+            value="custom" 
+            aria-label="custom calculator"
+            sx={{
+              '&.Mui-selected': {
+                backgroundColor: colors.yellowPrimary,
+                '&:hover': {
+                  backgroundColor: colors.yellowDark,
+                },
+              },
+            }}
+          >
+            Custom Calculator
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
 
       <Grid container spacing={4}>
         <Grid item xs={12} md={4}>
@@ -419,10 +529,10 @@ function LandlordPage() {
               {results && (
                 <MetricBox>
                   <MetricTooltip title="Annual cash flow divided by total investment">
-                    <Typography>Cash on Cash Return: {formatPercent(results.cashOnCashReturn)}</Typography>
+                    <Typography>Cash on Cash Return: {formatPercentage(results.cashOnCashReturn)}</Typography>
                   </MetricTooltip>
                   <MetricTooltip title="Net operating income divided by property value">
-                    <Typography>Cap Rate: {formatPercent(results.capRate)}</Typography>
+                    <Typography>Cap Rate: {formatPercentage(results.capRate)}</Typography>
                   </MetricTooltip>
                   <MetricTooltip title="Property price divided by annual gross income">
                     <Typography>Gross Rent Multiplier: {results.grossRentMultiplier.toFixed(2)}x</Typography>
@@ -431,7 +541,7 @@ function LandlordPage() {
                     <Typography>Debt Coverage Ratio: {results.debtServiceCoverageRatio.toFixed(2)}</Typography>
                   </MetricTooltip>
                   <MetricTooltip title="Required occupancy rate to cover expenses">
-                    <Typography>Break-even Occupancy: {formatPercent(results.breakEvenOccupancy)}</Typography>
+                    <Typography>Break-even Occupancy: {formatPercentage(results.breakEvenOccupancy)}</Typography>
                   </MetricTooltip>
                   <MetricTooltip title="Months needed to recover initial investment">
                     <Typography>Break-even Period: {results.riskMetrics.breakEvenMonths} months</Typography>
@@ -596,7 +706,7 @@ function LandlordPage() {
                         <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(year.propertyValue)}</td>
                         <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(year.equity)}</td>
                         <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(year.cashFlow)}</td>
-                        <td style={{ padding: '8px', textAlign: 'right' }}>{formatPercent(year.roi)}</td>
+                        <td style={{ padding: '8px', textAlign: 'right' }}>{formatPercentage(year.roi)}</td>
                         <td style={{ padding: '8px', textAlign: 'right' }}>{year.debtCoverageRatio.toFixed(2)}</td>
                       </tr>
                     ))}
@@ -617,10 +727,10 @@ function LandlordPage() {
                       <Typography>Price to Point-Rent Ratio: {results.locationMetrics.priceToPointRentRatio.toFixed(1)}x</Typography>
                     </MetricTooltip>
                     <MetricTooltip title="How much higher the market rent is compared to point system rent">
-                      <Typography>Market Rent Premium: {formatPercent(results.locationMetrics.marketRentPremium)}</Typography>
+                      <Typography>Market Rent Premium: {formatPercentage(results.locationMetrics.marketRentPremium)}</Typography>
                     </MetricTooltip>
                     <MetricTooltip title="Return on investment compared to market average">
-                      <Typography>Relative ROI: {formatPercent(results.locationMetrics.relativeROI)}</Typography>
+                      <Typography>Relative ROI: {formatPercentage(results.locationMetrics.relativeROI)}</Typography>
                     </MetricTooltip>
                     <MetricTooltip title="Overall profitability score for this location">
                       <Typography>Location Profitability Score: {results.locationMetrics.locationProfitabilityScore.toFixed(1)}</Typography>
