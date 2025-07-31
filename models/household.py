@@ -2,6 +2,7 @@
 import collections
 import random
 import numpy as np
+from .dutch_names import generate_dutch_name
 
 TimeLineEntry = collections.namedtuple('TimeLineEntry', ('year', 'period', 'record'))
 
@@ -21,6 +22,7 @@ class Contract:
 class Household:
     def __init__(self, id, age, size, income, wealth, contract=None, is_owner_occupier=False, mortgage_balance=0, mortgage_interest_rate=0.03, mortgage_term=30):
         self.id = id
+        self.name = generate_dutch_name()  # Generate a Dutch name for the household
         self.age = age
         self.size = size
         self.income = income
@@ -89,9 +91,47 @@ class Household:
         # Age increment for 6-month period
         self.age += 0.5
         
+        # Track wealth trend
+        self.wealth_history = getattr(self, 'wealth_history', [])
+        self.wealth_history.append(self.wealth)
+        # Keep last 4 periods (2 years) of history
+        if len(self.wealth_history) > 4:
+            self.wealth_history = self.wealth_history[-4:]
+        
+        # Calculate wealth trend
+        self.wealth_trend = 0
+        if len(self.wealth_history) >= 2:
+            initial_wealth = self.wealth_history[0]
+            current_wealth = self.wealth_history[-1]
+            if initial_wealth != 0:
+                self.wealth_trend = (current_wealth - initial_wealth) / initial_wealth
+            else:
+                # If initial wealth was 0, calculate trend based on absolute change
+                self.wealth_trend = current_wealth / 1000 if current_wealth > 0 else 0
+        
         # Income and wealth adjustments for 6-month period
         self.adjust_income()
         self.adjust_wealth()
+        
+        # Check if we need to find cheaper housing
+        if self.contract and not self.is_owner_occupier:
+            current_rent = self.contract.unit.rent
+            monthly_income = self.income / 12
+            rent_burden = current_rent / monthly_income if monthly_income > 0 else float('inf')
+            
+            # Factors that might force a move
+            wealth_depleting = self.wealth_trend < -0.2  # Significant wealth decrease
+            high_rent_burden = rent_burden > 0.5  # Spending more than 50% on rent
+            low_savings = self.wealth < current_rent * 6  # Less than 6 months of rent in savings
+            
+            if (wealth_depleting and high_rent_burden) or low_savings:
+                self.needs_cheaper_housing = True
+                self.add_event({
+                    "type": "FINANCIAL_STRESS",
+                    "rent_burden": rent_burden,
+                    "wealth_trend": self.wealth_trend,
+                    "savings_months": self.wealth / current_rent if current_rent > 0 else 0
+                }, year, period)
         
         # Update contract and satisfaction
         if self.is_owner_occupier:
@@ -119,7 +159,8 @@ class Household:
             "life_stage": self.life_stage,
             "income": self.income,
             "wealth": self.wealth,
-            "satisfaction": self.satisfaction
+            "satisfaction": self.satisfaction,
+            "wealth_trend": self.wealth_trend
         }, year, period)
 
     def _update_life_stage(self):
@@ -509,13 +550,36 @@ class Household:
         if self.contract:
             self.contract.update()
 
-    def add_event(self, info, year, period):
+    def add_event(self, event_data, year, period):
         """Add an event to the household's timeline"""
-        if year is not None and period is not None:
-            self.timeline.append(new_timeline_entry(info, year, period))
-            # Keep only the last 10 events to prevent memory bloat
-            if len(self.timeline) > 10:
-                self.timeline = self.timeline[-10:]
+        # Add common fields to all events
+        event_data.update({
+            "household_id": self.id,
+            "household_name": self.name,
+            "age": int(self.age),  # Ensure numeric values are basic types
+            "size": int(self.size),
+            "income": float(self.income),
+            "wealth": float(self.wealth),
+            "housed": bool(self.housed),
+            "life_stage": str(self.life_stage)  # Ensure string values are basic types
+        })
+        
+        # Ensure all values in event_data are JSON serializable
+        for key, value in event_data.items():
+            if isinstance(value, (int, float, str, bool, type(None))):
+                continue
+            elif isinstance(value, (list, tuple)):
+                event_data[key] = list(value)  # Convert to list
+            elif isinstance(value, dict):
+                continue  # Assume nested dicts are handled
+            else:
+                # Convert any other types to string representation
+                event_data[key] = str(value)
+        
+        self.timeline.append(TimeLineEntry(year, period, event_data))
+        # Keep only the last 10 events to prevent memory bloat
+        if len(self.timeline) > 10:
+            self.timeline = self.timeline[-10:]
 
     def process_mortgage_month(self):
         if self.is_owner_occupier and self.mortgage_balance > 0:
@@ -588,3 +652,107 @@ class Household:
                 "other_household_size": other_household.size,
                 "combined_size": self.size + other_household.size
             }, year, period)
+
+    def should_move(self, market_conditions):
+        """Determine if household should consider moving based on various factors."""
+        # Don't move if just moved recently (within 6 months)
+        if self.months_in_current_unit < 6:
+            return False
+
+        # Base move probability 5%
+        base_move_probability = 0.05
+
+        # Financial stress increases move probability
+        if hasattr(self, 'wealth_trend') and self.wealth_trend < 0:
+            # Consider moving if wealth is decreasing
+            if self.wealth_trend < -0.1:  # 10% decrease in wealth
+                base_move_probability += abs(self.wealth_trend) * 0.2
+
+        # High rent burden increases move probability
+        current_rent_burden = self.current_rent_burden() if self.housed else 0
+        if current_rent_burden > 0.4:  # More than 40% of income on rent
+            base_move_probability += (current_rent_burden - 0.4) * 0.3
+
+        # Low satisfaction increases move probability
+        if hasattr(self, 'satisfaction') and self.satisfaction < 0.5:  # Unsatisfied
+            base_move_probability += (0.5 - self.satisfaction) * 0.2
+
+        # Market conditions affect probability
+        market_multiplier = market_conditions.get('mobility_multiplier', 1.0)
+        final_probability = base_move_probability * market_multiplier
+
+        # Cap the maximum probability at 30%
+        final_probability = min(0.3, final_probability)
+
+        return random.random() < final_probability
+
+    def find_new_unit(self, market, policy):
+        """Find a new unit to move to based on household preferences and constraints."""
+        available_units = [u for u in market.units if not u.occupied]
+        if not available_units:
+            return None
+
+        # Score each available unit
+        scored_units = []
+        for unit in available_units:
+            # Skip if rent is too high (more than 50% of income)
+            if unit.rent > self.income * 0.5:
+                continue
+
+            score = self.evaluate_unit(unit, market.market_conditions)
+            scored_units.append((score, unit))
+
+        if not scored_units:
+            return None
+
+        # Sort by score (highest first) and return the best unit
+        scored_units.sort(reverse=True, key=lambda x: x[0])
+        return scored_units[0][1] if scored_units else None
+
+    def evaluate_unit(self, unit, market_conditions):
+        """Score a unit based on household preferences and market conditions."""
+        score = 0.0
+
+        # Base affordability score (0-40 points)
+        rent_to_income = unit.rent / self.income if self.income > 0 else float('inf')
+        if rent_to_income <= 0.3:
+            affordability_score = 40
+        elif rent_to_income <= 0.4:
+            affordability_score = 30
+        elif rent_to_income <= 0.5:
+            affordability_score = 20
+        else:
+            affordability_score = 0
+        
+        # If wealth is decreasing, put more weight on affordability
+        if hasattr(self, 'wealth_trend') and self.wealth_trend < 0:
+            affordability_score *= 1.5  # 50% more importance when losing money
+
+        score += affordability_score
+
+        # Quality score (0-30 points)
+        quality_score = unit.quality * 30
+        score += quality_score
+
+        # Size match score (0-20 points)
+        ideal_size = self.size * 25  # 25 square meters per person
+        size_diff = abs(unit.square_meters - ideal_size) if hasattr(unit, 'square_meters') else float('inf')
+        if size_diff <= 10:
+            size_score = 20
+        elif size_diff <= 20:
+            size_score = 15
+        elif size_diff <= 30:
+            size_score = 10
+        elif size_diff <= 40:
+            size_score = 5
+        else:
+            size_score = 0
+        score += size_score
+
+        # Location/neighborhood score (0-10 points)
+        # This could be based on distance to city center, amenities, etc.
+        # For now, use a random factor influenced by market conditions
+        location_score = random.uniform(0, 10) * market_conditions.get('location_multiplier', 1.0)
+        score += location_score
+
+        return score

@@ -38,7 +38,14 @@ const SimulationGraph: React.FC<Props> = ({ frame }) => {
   // Update history when new frame arrives
   useEffect(() => {
     if (frame) {
-      setHistory(prev => [...prev, frame]);
+      setHistory(prev => {
+        // Keep only the last 50 frames to prevent memory issues
+        const newHistory = [...prev, frame];
+        if (newHistory.length > 50) {
+          return newHistory.slice(-50);
+        }
+        return newHistory;
+      });
     }
   }, [frame]);
 

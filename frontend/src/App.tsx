@@ -15,6 +15,7 @@ import LandlordPage from './pages/LandlordPage';
 import AboutPage from './pages/AboutPage';
 import PropertyDetailPage from './pages/PropertyDetailPage';
 import ScenarioPage from './pages/ScenarioPage';
+import { SimulationProvider } from './contexts/SimulationContext';
 
 // Theme colors
 const colors = {
@@ -30,7 +31,7 @@ function App() {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <>
+    <SimulationProvider>
       <CssBaseline />
       <AppBar 
         position="sticky" 
@@ -115,7 +116,7 @@ function App() {
           <Route path="/" element={<Navigate to="/simulation" replace />} />
         </Routes>
       </Container>
-    </>
+    </SimulationProvider>
   );
 }
 

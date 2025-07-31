@@ -44,7 +44,9 @@ class RealtimeSimulation:
             'unhoused': len(self.unhoused_households),
             'unhoused_households': self.unhoused_households,
             'units': self.simulation.rental_market.units,
-            'households': self.simulation.households
+            'households': self.simulation.households,
+            'moves': getattr(self.simulation, 'moves_this_period', []),
+            'events': getattr(self.simulation, 'events_this_period', [])
         }
         self.frames.append(current_state)
         self.unhoused_data.append(current_state['unhoused'])

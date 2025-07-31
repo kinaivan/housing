@@ -1,0 +1,12 @@
+/* Move arrow animations */
+@keyframes moveDash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+path {
+  stroke-dasharray: 8;
+  stroke-dashoffset: 0;
+  animation: moveDash 2s linear infinite;
+} 

@@ -6,7 +6,7 @@ import copy
 from models.household import Household, Contract
 from models.unit import RentalUnit, Landlord
 from models.market import RentalMarket
-from models.policy import RentCapPolicy
+from models.policy import RentCapPolicy, LandValueTaxPolicy
 
 class Simulation:
     def __init__(self, households, landlords, rental_market, policy, years=1):
@@ -22,6 +22,7 @@ class Simulation:
         self.total_property_tax_paid = 0
         self.total_wealth_tax_paid = 0
         self.next_household_id = max(h.id for h in households) + 1 if households else 0
+        self.moves_this_period = []  # Track moves within each period
         
         # Initialize detailed metrics tracking
         self.detailed_metrics = {
@@ -63,298 +64,170 @@ class Simulation:
         # Track actions for this step
         actions_this_step = 0
         
-        # Process household departures and lifecycle events
-        households_to_remove = []
-        new_households = []
-
-        # 1. Household departures (leaving the neighborhood) - reduced rates
+        # Track households to remove after processing
+        households_to_remove = set()
+        
+        # 1. Natural population changes (aging, etc)
         for household in self.households:
-            if household not in households_to_remove:
-                # Lower base departure rate
-                leave_chance = 0.02  # Base 2% chance per period
-                
-                # Moderate incentives to leave
-                if household.current_rent_burden() > 0.6:  # Increased threshold
-                    leave_chance += 0.05  # Reduced penalty
-                if not household.housed:
-                    leave_chance += 0.08  # Still higher for unhoused but not as extreme
-                if household.satisfaction < 0.2:  # More extreme dissatisfaction threshold
-                    leave_chance += 0.04
-                
-                # Age-based factors
-                if household.age > 75:
-                    leave_chance += 0.05  # Reduced from 0.1
-                
-                if random.random() < leave_chance:
-                    # If leaving, properly handle their current housing
-                    if household.housed:
-                        if household.contract and household.contract.unit:
-                            household.contract.unit.remove_tenant(household)
-                    households_to_remove.append(household)
-                    actions_this_step += 1
-
-        # 2. Household breakups - only for housed households with multiple people
+            # Age increment handled in household.update_month()
+            pass
+            
+        # 2. Household breakups
         for household in self.households:
-            if (household not in households_to_remove and 
-                household.size > 1 and 
-                household.housed and 
-                household.contract and 
-                household.contract.unit and
-                household.contract.unit.occupied and
-                household.contract.unit.get_total_household_size() > 1):  # Only households with people can break up
+            if household.size > 1:  # Can only break up if more than 1 person
+                breakup_chance = 0.02  # 2% base chance per period
                 
-                breakup_chance = 0.04  # Base 4% chance per period
-                
-                # Moderate chance increases
-                if household.satisfaction < 0.3:
-                    breakup_chance += 0.05
-                if household.current_rent_burden() > 0.6:
-                    breakup_chance += 0.06
-                if household.size > 3:
-                    breakup_chance += 0.03
-                
-                # Merged households are more likely to break up
-                if getattr(household, 'is_merged', False):
-                    breakup_chance += getattr(household, 'merge_instability', 0.3)
+                # Increase chance based on financial stress
+                if household.contract:
+                    rent_burden = household.current_rent_burden()
+                    if rent_burden > 0.4:  # Moderate stress
+                        breakup_chance += 0.02
+                    if rent_burden > 0.6:  # High stress
+                        breakup_chance += 0.03
                 
                 if random.random() < breakup_chance:
-                    # Split into two households - one stays, one leaves
+                    # Determine split
                     original_size = household.size
-                    new_size = max(1, household.size // 2)
+                    new_size = random.randint(1, household.size - 1)
                     remaining_size = household.size - new_size
                     
-                    # Ensure both resulting households have at least 1 person
-                    if new_size > 0 and remaining_size > 0 and new_size >= 1 and remaining_size >= 1:
-                        # Create new household that will leave
-                        new_hh = self._create_new_household()
-                        new_hh.size = new_size
-                        new_hh.wealth = household.wealth * 0.4
-                        new_hh.income = household.income * 0.6
-                        
-                        # Update original household size and resources
-                        household.size = remaining_size
-                        household.wealth *= 0.6
-                        household.income *= 0.8  # Some income loss due to breakup
-                        
-                        # New household becomes unhoused
-                        new_hh.housed = False
-                        new_hh.contract = None
-                        new_households.append(new_hh)
-                        actions_this_step += 1
-                        
-                        # Record the breakup with proper details
-                        if household.contract and household.contract.unit:
-                            household.record_breakup_event(new_hh, year, period)
-                            # Also log the breakup in movement logs
-                            household.add_event({
-                                "type": "HOUSEHOLD_BREAKUP_DETAILED",
-                                "unit_id": household.contract.unit.id,
-                                "original_size": original_size,
-                                "remaining_size": remaining_size,
-                                "departed_size": new_size,
-                                "departed_household_id": new_hh.id
-                            }, year, period)
-
-        # 3. Household mergers and sharing
-        # Only include households with actual people (size > 0) and valid contracts
+                    # Create new household
+                    new_hh = Household(
+                        id=self.next_household_id,
+                        age=max(18, household.age - random.randint(0, 10)),
+                        size=new_size,
+                        income=household.income * (new_size / original_size),
+                        wealth=household.wealth * (new_size / original_size)
+                    )
+                    self.next_household_id += 1
+                    
+                    # Update original household
+                    household.size = remaining_size
+                    household.income *= (remaining_size / original_size)
+                    household.wealth *= (remaining_size / original_size)
+                    
+                    # Add new household to simulation
+                    self.households.append(new_hh)
+                    actions_this_step += 1
+                    
+                    # Record the breakup event
+                    breakup_event = {
+                        "type": "HOUSEHOLD_BREAKUP",
+                        "household_id": household.id,
+                        "household_name": household.name,
+                        "from_unit_id": household.contract.unit.id if household.contract else None,
+                        "original_size": original_size,
+                        "remaining_size": remaining_size,
+                        "new_household_id": new_hh.id,
+                        "new_household_size": new_size
+                    }
+                    self.events_this_period.append(breakup_event)
+        
+        # 3. Household mergers
         unhoused_households = [h for h in self.households 
-                              if not h.housed and h not in households_to_remove and h.size > 0]
+                             if not h.housed and h not in households_to_remove and h.size > 0]
         housed_households = [h for h in self.households 
-                            if (h.housed and h not in households_to_remove and h.size > 0 and 
-                                h.contract and h.contract.unit and h.contract.unit.occupied)]
+                           if h.housed and h not in households_to_remove and h.size > 0]
         
-        # A) Real household mergers (two households become one)
-        merger_attempts = 0
-        for unhoused_hh in unhoused_households[:2]:  # Limit attempts
-            if merger_attempts >= 1:  # Max 1 merger per step
-                break
-            for housed_hh in housed_households:
-                if (housed_hh.contract and housed_hh.contract.unit and 
-                    housed_hh.contract.unit.occupied and
-                    housed_hh.contract.unit.get_total_household_size() > 0 and  # Unit must have people
-                    len(housed_hh.contract.unit.tenants) == 1 and  # Only merge with single households
-                    housed_hh.size > 0 and unhoused_hh.size > 0 and  # Both must have people
-                    abs(housed_hh.age - unhoused_hh.age) < 20 and
-                    housed_hh.life_stage == unhoused_hh.life_stage and
-                    random.random() < 0.15):  # Lower chance for true merger
+        for unhoused_hh in unhoused_households:
+            # Try to find a compatible housed household to merge with
+            merge_chance = 0.1  # 10% base chance
+            if random.random() < merge_chance:
+                compatible_households = [
+                    h for h in housed_households
+                    if h.contract and h.contract.unit and
+                    h.contract.unit.size >= (h.size + unhoused_hh.size)
+                ]
+                
+                if compatible_households:
+                    target_hh = random.choice(compatible_households)
                     
-                    # True household merger - combine households into one
-                    unit = housed_hh.contract.unit
+                    # Record the merger event
+                    merger_event = {
+                        "type": "HOUSEHOLD_MERGER",
+                        "household_id": target_hh.id,
+                        "household_name": target_hh.name,
+                        "from_unit_id": target_hh.contract.unit.id,
+                        "original_size": target_hh.size,
+                        "other_household_id": unhoused_hh.id,
+                        "other_household_size": unhoused_hh.size,
+                        "combined_size": target_hh.size + unhoused_hh.size
+                    }
+                    self.events_this_period.append(merger_event)
                     
-                    # Store original details for logging
-                    original_housed_size = housed_hh.size
-                    original_unhoused_size = unhoused_hh.size
-                    unhoused_hh_id = unhoused_hh.id
-                    
-                    # Combine household characteristics
-                    combined_size = housed_hh.size + unhoused_hh.size
-                    
-                    # Prevent overly large households (max 6 people)
-                    if combined_size > 6:
-                        continue
-                        
-                    combined_income = housed_hh.income + unhoused_hh.income * 0.8  # Slight efficiency loss
-                    combined_wealth = housed_hh.wealth + unhoused_hh.wealth
-                    combined_age = (housed_hh.age + unhoused_hh.age) / 2
-                    
-                    # Update the housed household with combined stats
-                    housed_hh.size = combined_size
-                    housed_hh.income = combined_income
-                    housed_hh.wealth = combined_wealth
-                    housed_hh.age = combined_age
-                    
-                    # Mark household as merged (more likely to split later)
-                    housed_hh.is_merged = True
-                    housed_hh.merge_instability = random.uniform(0.3, 0.6)  # Instability factor
-                    
-                    # Record the merger with detailed information
-                    housed_hh.record_merger_event(unhoused_hh, year, period)
-                    housed_hh.add_event({
-                        "type": "HOUSEHOLD_MERGER_DETAILED",
-                        "unit_id": unit.id,
-                        "merged_household_a_id": housed_hh.id,
-                        "merged_household_b_id": unhoused_hh_id,
-                        "household_a_original_size": original_housed_size,
-                        "household_b_original_size": original_unhoused_size,
-                        "combined_size": combined_size
-                    }, year, period)
-                    
-                    # Remove the unhoused household (it's now part of the housed one)
-                    households_to_remove.append(unhoused_hh)
+                    # Perform the merger
+                    target_hh.size += unhoused_hh.size
+                    target_hh.income += unhoused_hh.income
+                    target_hh.wealth += unhoused_hh.wealth
+                    households_to_remove.add(unhoused_hh)
                     actions_this_step += 1
-                    merger_attempts += 1
-                    break
         
-        # B) Apartment sharing (households share space but remain separate)
-        for unhoused_hh in unhoused_households[:3]:
-            if unhoused_hh in households_to_remove or unhoused_hh.size == 0:
-                continue
-            for housed_hh in housed_households:
-                if (housed_hh.contract and housed_hh.contract.unit and 
-                    housed_hh.contract.unit.occupied and
-                    housed_hh.contract.unit.get_total_household_size() > 0 and  # Unit must have people
-                    housed_hh.size > 0 and  # Housed household must have people
-                    len(housed_hh.contract.unit.tenants) == 1 and
-                    abs(housed_hh.age - unhoused_hh.age) < 15 and
-                    random.random() < 0.20):  # Sharing is more common than merging
-                    
-                    unit = housed_hh.contract.unit
-                    unit.add_tenant(unhoused_hh)
-                    unhoused_hh.contract = Contract(unhoused_hh, unit)
-                    unhoused_hh.housed = True
-                    unhoused_hh.calculate_satisfaction()
-                    
-                    # Log the sharing arrangement
-                    unhoused_hh.add_event({
-                        "type": "APARTMENT_SHARING",
-                        "unit_id": unit.id,
-                        "sharing_with_household_id": housed_hh.id,
-                        "own_size": unhoused_hh.size,
-                        "roommate_size": housed_hh.size
-                    }, year, period)
-                    
-                    actions_this_step += 1
-                    break
-
-        # 4. New household arrivals - scaled for smaller simulation (max 2 per step)
-        current_population = len(self.households) - len(households_to_remove) + len(new_households)
-        target_population = 20  # Scaled down target
-        
-        # Dynamic arrival rate based on current population
-        population_deficit = max(0, target_population - current_population)
-        base_arrival_rate = 0.15  # Lower base rate for smaller simulation
-        arrival_rate = base_arrival_rate + (population_deficit * 0.02)  # Increases with deficit
-        
-        # Add new households but limit to max 2 per step
-        arrivals_this_step = 0
-        max_arrivals_per_step = 2
-        
-        while (current_population < target_population and 
-               arrivals_this_step < max_arrivals_per_step and 
-               random.random() < arrival_rate):
-            new_household = self._create_new_household()
-            new_household.housed = False
-            new_households.append(new_household)
-            actions_this_step += 1
-            current_population += 1
-            arrivals_this_step += 1
-
-        # Remove departing households
-        for household in households_to_remove:
-            if household in self.households:
-                self.households.remove(household)
-
-        # Add new households
-        self.households.extend(new_households)
+        # Remove merged households
+        self.households = [h for h in self.households if h not in households_to_remove]
         
         return actions_this_step
 
     def step(self, year, period):
-        # Track total actions for this step
+        # Reset events for this period
+        self.moves_this_period = []
+        self.events_this_period = []
         total_actions = 0
-        
 
-        # Process population changes first to capture the effects of breakups/mergers
-        population_actions = self._process_population_changes(year, period)
-        total_actions += population_actions
-        
         # Update market conditions
         self.rental_market.update_market_conditions()
         market_conditions = self.rental_market.market_conditions
 
-        # Update households and track movement actions
+        # Process population changes (births, deaths, aging)
+        population_changes = self._process_population_changes(year, period)
+        total_actions += population_changes
+
+        # Process household moves
         movement_actions = 0
         for household in self.households:
             # Update household for this period
             household.update_month(year, period)
             
-            # Track if household was housed before considering moving
+            # Record current state
             was_housed = household.housed
             current_unit = household.contract.unit if household.contract else None
-            
-            # Check for potential eviction due to high rent burden - more realistic risk
-            if (household.housed and 
-                household.contract is not None):
-                
-                rent_burden = household.current_rent_burden()
-                # Moderate eviction risk
-                if rent_burden > 0.6:  # Lowered threshold for more evictions
-                    eviction_risk = (rent_burden - 0.6) * 2.0  # Increased multiplier
-                    if random.random() < eviction_risk:
+            current_unit_id = current_unit.id if current_unit else None
+
+            # Check if household should move
+            if household.should_move(market_conditions):
+                # Find and move to new unit
+                new_unit = household.find_new_unit(self.rental_market, self.policy)
+                if new_unit:
+                    household.move_to(new_unit, year, period)
+                elif household.housed:
+                    # Couldn't find affordable housing, become unhoused
+                    if household.contract:
                         household.contract.unit.remove_tenant(household)
                         household.contract = None
-                        household.housed = False
-                        household.satisfaction = 0
-                        household.add_event({
-                            "type": "EVICTED",
-                            "reason": "High rent burden",
-                            "rent_burden": rent_burden
-                        }, year, period)
-                        total_actions += 1
+                    household.housed = False
+
+            # Get new state
+            new_unit = household.contract.unit if household.contract else None
+            new_unit_id = new_unit.id if new_unit else None
             
-            # Additional causes of becoming unhoused
-            if (household.housed and random.random() < 0.01):  # 1% chance of life events
-                life_event_reasons = ["Job loss", "Family emergency", "Health issues", "Relationship breakdown"]
-                reason = random.choice(life_event_reasons)
-                if household.contract:
-                    household.contract.unit.remove_tenant(household)
-                    household.contract = None
-                household.housed = False
-                household.satisfaction = 0
-                household.wealth = max(0, household.wealth - random.randint(1000, 5000))  # Financial impact
-                household.add_event({
-                    "type": "EVICTED",
-                    "reason": reason,
-                    "rent_burden": household.current_rent_burden()
-                }, year, period)
-                total_actions += 1
-            
-            # Consider moving for all households
-            household.consider_moving(self.rental_market, self.policy, year, period)
-            
-            # Check if household moved
-            if household.housed != was_housed or (household.contract and household.contract.unit != current_unit):
+            if current_unit_id != new_unit_id:
                 movement_actions += 1
+                # Record the move
+                move_type = "MOVE"
+                if not was_housed and new_unit_id is not None:
+                    move_type = "MOVE_IN"
+                elif was_housed and new_unit_id is None:
+                    move_type = "MOVE_OUT"
+                
+                move_event = {
+                    "type": move_type,
+                    "household_id": household.id,
+                    "household_name": household.name,
+                    "from_unit_id": current_unit_id,
+                    "to_unit_id": new_unit_id,
+                    "reason": household._determine_move_reason(new_unit) if new_unit else "Became Unhoused"
+                }
+                self.events_this_period.append(move_event)
+                self.moves_this_period.append(move_event)
 
         total_actions += movement_actions
 
@@ -366,7 +239,7 @@ class Simulation:
         # Government inspects units (twice per period)
         for landlord in self.landlords:
             for unit in landlord.units:
-                inspection_rate = self.policy.inspection_rate if self.policy else 0.0  # No inspections when policy is disabled
+                inspection_rate = self.policy.inspection_rate if self.policy else 0.0
                 if unit.occupied and random.random() < inspection_rate * 2:
                     if self.policy:  # Only inspect if there's a policy in place
                         self.policy.inspect(unit)
@@ -375,82 +248,71 @@ class Simulation:
         for landlord in self.landlords:
             landlord.collect_rent(periods=6)
 
-        # Property tax (6 months, pro-rated)
-        property_tax_this_period = 0
-        for landlord in self.landlords:
-            for unit in landlord.units:
-                # Use dynamic property value calculation
-                property_value = self._calculate_property_value(unit, year, period)
-                tax = (self.property_tax_rate / 2) * property_value  # Half-year tax
-                landlord.total_profit -= tax
-                property_tax_this_period += tax
-        self.total_property_tax_paid += property_tax_this_period
+        # Land Value Tax (6 months, pro-rated)
+        if isinstance(self.policy, LandValueTaxPolicy):
+            for landlord in self.landlords:
+                for unit in landlord.units:
+                    tax = self.policy.calculate_tax(unit, period_length=0.5)  # 6 months = 0.5 years
+                    landlord.total_profit -= tax
+                    landlord.wealth -= tax
 
-        # Wealth tax (annually, at end of year)
-        wealth_tax_this_period = 0
-        if period == 2:  # End of year (second period)
-            for household in self.households:
-                taxable_wealth = max(0, household.wealth - self.wealth_tax_threshold)
-                tax = self.wealth_tax_rate * taxable_wealth  # full year
-                household.wealth -= tax
-                wealth_tax_this_period += tax
-        self.total_wealth_tax_paid += wealth_tax_this_period
-
-        # Lower the wealth tax threshold for demonstration
-        self.wealth_tax_threshold = 10000
-
-        # Validate and fix data consistency before recording
-        fixes_made = self._validate_and_fix_household_unit_consistency()
-        
-        # Run final validation check
-        integrity_errors = self.validate_data_integrity()
-        if integrity_errors:
-            print(f"Year {year} Period {period}: {len(integrity_errors)} remaining data integrity issues:")
-            for error in integrity_errors[:5]:  # Show first 5 errors
-                print(f"  - {error}")
-            if len(integrity_errors) > 5:
-                print(f"  ... and {len(integrity_errors) - 5} more")
-        
-        # Record occupancy AFTER all movements and changes are complete
-        self._record_occupancy_state()
-        
-        # Record metrics including action count
-        self._record_detailed_metrics(year, period)
-        self._record_basic_metrics(year, period, total_actions)
-
-
-        
-        # Record detailed unit history for dashboard
-        for unit in self.rental_market.units:
-            # Get tenant information
-            tenant_info = None
-            if unit.occupied and unit.tenant:
-                tenant_info = {
-                    'id': unit.tenant.id,
-                    'size': unit.tenant.size,
-                    'income': unit.tenant.income,
-                    'wealth': unit.tenant.wealth,
-                    'satisfaction': getattr(unit.tenant, 'satisfaction', 0),
-                    'life_stage': getattr(unit.tenant, 'life_stage', 'unknown'),
-                    'rent_burden': unit.tenant.current_rent_burden() if hasattr(unit.tenant, 'current_rent_burden') else 0
-                }
-            
-            # Calculate dynamic property value based on current conditions
-            property_value = self._calculate_property_value(unit, year, period)
-            
-            # Record unit state for this period
-            unit_period_data = {
-                'year': year,
-                'period': period,
-                'rent': unit.rent,
-                'quality': unit.quality,
-                'property_value': property_value,
-                'occupied': unit.occupied,
-                'tenant_info': tenant_info,
-                'vacancy_duration': getattr(unit, 'vacancy_duration', 0),
-                'last_renovation': getattr(unit, 'last_renovation', 0)
+        # Get list of unhoused households with their details
+        unhoused_households = [
+            {
+                "id": h.id,
+                "name": h.name,
+                "size": h.size,
+                "income": h.income,
+                "wealth": h.wealth,
+                "months_unhoused": h.months_unhoused if hasattr(h, "months_unhoused") else 0
             }
-            self.unit_history[unit.id].append(unit_period_data)
+            for h in self.households if not h.housed
+        ]
+
+        # Create frame data with policy metrics and events
+        frame_data = {
+            "year": year,
+            "period": period,
+            "units": [
+                {
+                    "id": unit.id,
+                    "occupants": len(unit.tenants),
+                    "rent": unit.rent,
+                    "is_occupied": unit.occupied,
+                    "quality": unit.quality,
+                    "lastRenovation": unit.last_renovation,
+                    "land_value": unit.land_value,
+                    "improvement_value": unit.get_improvement_value(),
+                    "household": {
+                        "id": unit.tenants[0].id,
+                        "name": unit.tenants[0].name,
+                        "income": unit.tenants[0].income,
+                        "satisfaction": unit.tenants[0].satisfaction,
+                        "size": unit.tenants[0].size,
+                        "wealth": unit.tenants[0].wealth
+                    } if unit.tenants else None
+                }
+                for landlord in self.landlords
+                for unit in landlord.units
+            ],
+            "metrics": {
+                "total_units": len([u for l in self.landlords for u in l.units]),
+                "occupied_units": len([u for l in self.landlords for u in l.units if u.occupied]),
+                "average_rent": sum(u.rent for l in self.landlords for u in l.units) / len([u for l in self.landlords for u in l.units]) if self.landlords else 0,
+                "total_population": sum(len(u.tenants) for l in self.landlords for u in l.units if u.occupied),
+                "policy_metrics": self.policy.get_metrics() if self.policy else None
+            },
+            "moves": self.moves_this_period,
+            "events": self.events_this_period,
+            "unhoused_households": unhoused_households
+        }
+        
+        # Record metrics and validate data
+        self._record_occupancy_state()
+        self._record_detailed_metrics(year, period, total_actions)
+        self._validate_and_fix_household_unit_consistency()
+        
+        return frame_data
 
     def _calculate_property_value(self, unit, year, period):
         """Calculate dynamic property value based on multiple factors"""
@@ -508,7 +370,7 @@ class Simulation:
         max_value = unit.rent * 12 * 20
         return max(min_value, min(max_value, property_value))
 
-    def _record_detailed_metrics(self, year, period):
+    def _record_detailed_metrics(self, year, period, total_actions):
         # Record life stage distribution
         life_stages = defaultdict(int)
         for h in self.households:

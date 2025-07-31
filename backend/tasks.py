@@ -41,9 +41,12 @@ def _serialize_frame(frame: Dict) -> str:
             if hasattr(unit, "household") and unit.household:
                 household = unit.household
                 household_info = {
+                    "id": household.id if hasattr(household, "id") else None,
+                    "name": household.name if hasattr(household, "name") else None,
                     "income": int(household.income) if hasattr(household, "income") else 0,
-                    "size": household.size if hasattr(household, "size") else 0,
-                    "satisfaction": household.satisfaction if hasattr(household, "satisfaction") else 0,
+                    "size": int(household.size) if hasattr(household, "size") else 0,
+                    "satisfaction": float(household.satisfaction) if hasattr(household, "satisfaction") else 0,
+                    "wealth": float(household.wealth) if hasattr(household, "wealth") else 0,
                 }
 
             units_data.append({
@@ -67,9 +70,12 @@ def _serialize_frame(frame: Dict) -> str:
         "occupied_units": occupied_units,
         "vacancy_rate": round((total_units - occupied_units) / total_units * 100, 1) if total_units > 0 else 0,
         "average_rent": round(total_rent / total_units) if total_units > 0 else 0,
-        "total_population": total_occupants,
         "unhoused": frame.get("unhoused", 0),
     }
+
+    # Include policy metrics if available
+    if "policy_metrics" in frame:
+        metrics["policy_metrics"] = frame["policy_metrics"]
 
     data = {
         "year": frame.get("year"),
@@ -77,6 +83,82 @@ def _serialize_frame(frame: Dict) -> str:
         "metrics": metrics,
         "units": units_data
     }
+
+    # Include events if they exist (with logging)
+    if "events" in frame and isinstance(frame["events"], list):
+        logging.info(f"Sending {len(frame['events'])} events")
+        # Take only the last 50 events if there are more
+        events = frame["events"][-50:] if len(frame["events"]) > 50 else frame["events"]
+        # Ensure all event data is serializable
+        serialized_events = []
+        for event in events:
+            serialized_event = {}
+            for key, value in event.items():
+                if isinstance(value, (int, float, str, bool, type(None))):
+                    serialized_event[key] = value
+                elif isinstance(value, (list, tuple)):
+                    serialized_event[key] = list(value)
+                elif isinstance(value, dict):
+                    serialized_event[key] = value  # Assume nested dicts are already serializable
+                else:
+                    serialized_event[key] = str(value)  # Convert any other types to string
+            serialized_events.append(serialized_event)
+        data["events"] = serialized_events
+
+    # Include moves if they exist
+    if "moves" in frame and isinstance(frame["moves"], list):
+        logging.info(f"Sending {len(frame['moves'])} moves")
+        # Ensure all move data is serializable
+        serialized_moves = []
+        for move in frame["moves"]:
+            serialized_move = {}
+            for key, value in move.items():
+                if isinstance(value, (int, float, str, bool, type(None))):
+                    serialized_move[key] = value
+                elif isinstance(value, (list, tuple)):
+                    serialized_move[key] = list(value)
+                elif isinstance(value, dict):
+                    serialized_move[key] = value  # Assume nested dicts are already serializable
+                else:
+                    serialized_move[key] = str(value)  # Convert any other types to string
+            serialized_moves.append(serialized_move)
+        data["moves"] = serialized_moves
+
+    # Include unhoused households if they exist
+    if "unhoused_households" in frame and isinstance(frame["unhoused_households"], list):
+        logging.info(f"Sending {len(frame['unhoused_households'])} unhoused households")
+        # Ensure all household data is serializable
+        serialized_households = []
+        for household in frame["unhoused_households"]:
+            # Handle both dictionary and Household object cases
+            if hasattr(household, 'items'):  # It's a dictionary
+                household_data = household
+            else:  # It's a Household object
+                household_data = {
+                    "id": household.id if hasattr(household, "id") else None,
+                    "name": household.name if hasattr(household, "name") else None,
+                    "size": int(household.size) if hasattr(household, "size") else 0,
+                    "income": float(household.income) if hasattr(household, "income") else 0,
+                    "wealth": float(household.wealth) if hasattr(household, "wealth") else 0,
+                    "months_unhoused": int(household.months_unhoused) if hasattr(household, "months_unhoused") else 0,
+                    "satisfaction": float(household.satisfaction) if hasattr(household, "satisfaction") else 0,
+                    "housed": bool(household.housed) if hasattr(household, "housed") else False,
+                }
+
+            # Further ensure all values are serializable
+            serialized_household = {}
+            for key, value in household_data.items():
+                if isinstance(value, (int, float, str, bool, type(None))):
+                    serialized_household[key] = value
+                elif isinstance(value, (list, tuple)):
+                    serialized_household[key] = list(value)
+                elif isinstance(value, dict):
+                    serialized_household[key] = value  # Assume nested dicts are already serializable
+                else:
+                    serialized_household[key] = str(value)  # Convert any other types to string
+            serialized_households.append(serialized_household)
+        data["unhoused_households"] = serialized_households
+
     return json.dumps(data)
 
 

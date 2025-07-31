@@ -1,30 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  Box,
   Container,
-  Typography,
+  Box,
   Button,
-  Paper,
-  ButtonGroup,
-  Alert,
-  CircularProgress,
-  Switch,
-  FormControlLabel,
+  Typography,
   Slider,
+  Paper,
+  Stack,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import { useSimulation } from '../contexts/SimulationContext';
 import HousingGrid from '../components/HousingGrid';
-import useSimulation from '../hooks/useSimulation';
+import EventLog from '../components/EventLog';
 
 // Theme colors
 const colors = {
-  yellowPrimary: '#FFD700', // Golden yellow
-  yellowLight: '#FFF4B8',   // Light yellow
-  yellowDark: '#FFC000',    // Dark yellow
-  textDark: '#2C2C2C',     // Dark text
-  white: '#FFFFFF',        // Pure white
+  yellowPrimary: '#FFD700',
+  yellowLight: '#FFF4B8',
+  yellowDark: '#FFC000',
+  textDark: '#2C2C2C',
+  white: '#FFFFFF',
 };
 
 // Custom Timeline component
@@ -40,13 +42,13 @@ function Timeline({
   currentPeriod: number;
 }) {
   // Create markers for every 5 years
-  const yearMarkers = [0, 5, 10, 15, 20, 25, 30];
+  const yearMarkers = Array.from({ length: Math.ceil(totalSteps / 10) + 1 }, (_, i) => i * 5);
   
   return (
     <Box sx={{ width: '100%', mb: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
         <Typography variant="body2" color="text.secondary">
-          Year {currentYear} of 30, Period {currentPeriod}
+          Year {currentYear}, Period {currentPeriod}
         </Typography>
         <Typography variant="body2" color="text.secondary">
           Progress: {Math.round((currentStep / (totalSteps - 1)) * 100)}%
@@ -96,131 +98,213 @@ function Timeline({
   );
 }
 
-function StatCard({ title, value, subtitle }: { title: string; value: string | number; subtitle?: string }) {
-  return (
-    <Paper
-      elevation={2}
-      sx={{
-        p: 3,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        textAlign: 'center',
-        backgroundColor: colors.white,
-      }}
-    >
-      <Typography variant="h6" gutterBottom color={colors.textDark}>
-        {title}
-      </Typography>
-      <Typography variant="h4" color="primary" sx={{ mb: 1 }}>
-        {value}
-      </Typography>
-      {subtitle && (
-        <Typography variant="body2" color="text.secondary">
-          {subtitle}
-        </Typography>
-      )}
-    </Paper>
-  );
+interface SimulationControls {
+  initial_households: number;
+  migration_rate: number;
+  years: number;
+  policy_type: 'none' | 'rent_cap' | 'lvt';
+  rent_cap_enabled?: boolean;
+  lvt_rate?: number;
 }
 
-function SimulationPage() {
-  const [rentCapEnabled, setRentCapEnabled] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
-  const {
-    units,
-    stats,
-    isRunning,
-    isPaused,
-    error,
-    status,
-    currentYear,
-    currentPeriod,
-    startSimulation,
-    pauseSimulation,
-    resumeSimulation,
-    resetSimulation,
-    seekToStep
-  } = useSimulation();
+const SimulationPage = () => {
+  const { startSimulation, pauseSimulation, resumeSimulation, resetSimulation, frame, isRunning, isPaused, error, currentYear, currentPeriod } = useSimulation();
+  const [controls, setControls] = useState<SimulationControls>({
+    initial_households: 20,
+    migration_rate: 0.1,
+    years: 10,
+    policy_type: 'none',
+    rent_cap_enabled: false,
+    lvt_rate: 0.10,
+  });
 
   // Calculate current step (0-based)
-  const totalSteps = 60; // 30 years * 2 periods per year
+  const totalSteps = controls.years * 2; // years * 2 periods per year
   const currentStep = ((currentYear - 1) * 2) + (currentPeriod - 1);
 
-  const handlePlayPause = async () => {
-    if (isPaused) {
-      resumeSimulation();
-    } else if (isRunning) {
-      pauseSimulation();
-    } else if (!isStarting) {
-      setIsStarting(true);
-      try {
-        await startSimulation({ 
-          rent_cap_enabled: rentCapEnabled,
-          years: 30
-        });
-      } catch (err) {
-        console.error('Failed to start simulation:', err);
-      } finally {
-        setIsStarting(false);
-      }
-    }
-  };
-
-  const handleReset = async () => {
+  const handleStart = async () => {
     try {
-      await resetSimulation();
-    } catch (err) {
-      console.error('Failed to reset simulation:', err);
+      const params: any = {
+        initial_households: controls.initial_households,
+        migration_rate: controls.migration_rate,
+        years: controls.years,
+      };
+
+      // Add policy-specific parameters
+      switch (controls.policy_type) {
+        case 'rent_cap':
+          params.rent_cap_enabled = true;
+          break;
+        case 'lvt':
+          params.lvt_enabled = true;
+          params.lvt_rate = controls.lvt_rate;
+          break;
+        default:
+          // No policy parameters needed
+          break;
+      }
+
+      await startSimulation(params);
+    } catch (error) {
+      console.error('Failed to start simulation:', error);
     }
   };
 
-  const handleRentCapToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRentCapEnabled(event.target.checked);
-    if (isRunning || isPaused) {
-      await resetSimulation();
-      setTimeout(async () => {
-        setIsStarting(true);
-        try {
-          await startSimulation({ 
-            rent_cap_enabled: event.target.checked,
-            years: 30
-          });
-        } catch (err) {
-          console.error('Failed to start simulation:', err);
-        } finally {
-          setIsStarting(false);
-        }
-      }, 500);
-    }
+  const handlePolicyChange = (event: any) => {
+    setControls(prev => ({
+      ...prev,
+      policy_type: event.target.value,
+    }));
   };
+
+  const eventsToShow = frame ? (
+    (frame.events && frame.events.length > 0)
+      ? frame.events
+      : (frame.moves || []).map(m => ({ ...m, type: (m as any).type ?? 'MOVE' }))
+  ) : [];
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Hero Section */}
-      <Box sx={{ mb: 4, textAlign: 'center' }}>
-        <Typography variant="h3" component="h1" gutterBottom color={colors.textDark}>
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" sx={{ mb: 3, color: colors.textDark }}>
           Housing Market Simulation
         </Typography>
-        <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
-          Watch how housing units evolve over time (6-month intervals)
-        </Typography>
+
+        {/* Simulation Controls */}
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Stack spacing={3}>
+            <Typography variant="h6" sx={{ color: colors.textDark }}>
+              Simulation Settings
+            </Typography>
+
+            {/* Initial Households */}
+            <Box>
+              <Typography gutterBottom>Initial Households: {controls.initial_households}</Typography>
+              <Slider
+                value={controls.initial_households}
+                onChange={(_, value) => setControls(prev => ({ ...prev, initial_households: value as number }))}
+                min={5}
+                max={50}
+                step={5}
+                disabled={isRunning}
+              />
+            </Box>
+
+            {/* Migration Rate */}
+            <Box>
+              <Typography gutterBottom>Migration Rate: {controls.migration_rate}</Typography>
+              <Slider
+                value={controls.migration_rate}
+                onChange={(_, value) => setControls(prev => ({ ...prev, migration_rate: value as number }))}
+                min={0}
+                max={0.5}
+                step={0.05}
+                disabled={isRunning}
+              />
+            </Box>
+
+            {/* Simulation Years */}
+            <Box>
+              <Typography gutterBottom>Simulation Years: {controls.years}</Typography>
+              <Slider
+                value={controls.years}
+                onChange={(_, value) => setControls(prev => ({ ...prev, years: value as number }))}
+                min={1}
+                max={20}
+                step={1}
+                disabled={isRunning}
+              />
+            </Box>
+
+            {/* Policy Selection */}
+            <FormControl fullWidth>
+              <InputLabel>Policy Type</InputLabel>
+              <Select
+                value={controls.policy_type}
+                onChange={handlePolicyChange}
+                disabled={isRunning}
+                label="Policy Type"
+              >
+                <MenuItem value="none">No Policy</MenuItem>
+                <MenuItem value="rent_cap">Rent Cap</MenuItem>
+                <MenuItem value="lvt">Land Value Tax (No Property Tax)</MenuItem>
+              </Select>
+            </FormControl>
+
+            {/* Policy-specific controls */}
+            {controls.policy_type === 'lvt' && (
+              <Box>
+                <Typography gutterBottom>Land Value Tax Rate: {(controls.lvt_rate! * 100).toFixed(1)}%</Typography>
+                <Slider
+                  value={controls.lvt_rate}
+                  onChange={(_, value) => setControls(prev => ({ ...prev, lvt_rate: value as number }))}
+                  min={0.05}
+                  max={0.20}
+                  step={0.01}
+                  disabled={isRunning}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(value) => `${(value * 100).toFixed(1)}%`}
+                />
+              </Box>
+            )}
+
+            {/* Control Buttons */}
+            <Stack direction="row" spacing={2}>
+              {!isRunning ? (
+                <Button
+                  variant="contained"
+                  startIcon={<PlayArrowIcon />}
+                  onClick={handleStart}
+                  sx={{
+                    backgroundColor: colors.yellowPrimary,
+                    color: colors.textDark,
+                    '&:hover': {
+                      backgroundColor: colors.yellowDark,
+                    },
+                  }}
+                >
+                  Start Simulation
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  startIcon={isPaused ? <PlayArrowIcon /> : <PauseIcon />}
+                  onClick={isPaused ? resumeSimulation : pauseSimulation}
+                  sx={{
+                    backgroundColor: colors.yellowPrimary,
+                    color: colors.textDark,
+                    '&:hover': {
+                      backgroundColor: colors.yellowDark,
+                    },
+                  }}
+                >
+                  {isPaused ? 'Resume' : 'Pause'}
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                startIcon={<RestartAltIcon />}
+                onClick={resetSimulation}
+                sx={{
+                  borderColor: colors.yellowPrimary,
+                  color: colors.textDark,
+                  '&:hover': {
+                    borderColor: colors.yellowDark,
+                    backgroundColor: colors.yellowLight,
+                  },
+                }}
+              >
+                Reset
+              </Button>
+            </Stack>
+          </Stack>
+        </Paper>
 
         {/* Error Display */}
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 3 }}>
             {error}
           </Alert>
-        )}
-
-
-
-        {/* Loading State */}
-        {isStarting && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-            <CircularProgress />
-          </Box>
         )}
 
         {/* Timeline */}
@@ -233,89 +317,33 @@ function SimulationPage() {
           />
         )}
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <ButtonGroup variant="contained" size="large">
-            <Button
-              onClick={handlePlayPause}
-              startIcon={isPaused || !isRunning ? <PlayArrowIcon /> : <PauseIcon />}
-              disabled={status === 'error' || isStarting}
-              sx={{
-                backgroundColor: colors.yellowDark,
-                '&:hover': {
-                  backgroundColor: colors.yellowPrimary,
-                },
-              }}
-            >
-              {isPaused ? 'Resume' : (isRunning ? 'Pause' : 'Start')}
-            </Button>
-            <Button
-              onClick={handleReset}
-              startIcon={<RestartAltIcon />}
-              disabled={status === 'error' || isStarting}
-              sx={{
-                backgroundColor: colors.yellowDark,
-                '&:hover': {
-                  backgroundColor: colors.yellowPrimary,
-                },
-              }}
-            >
-              Reset
-            </Button>
-          </ButtonGroup>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={rentCapEnabled}
-                onChange={handleRentCapToggle}
-                color="primary"
-              />
-            }
-            label={`Rent Cap Policy: ${rentCapEnabled ? 'Enabled' : 'Disabled'}`}
+        {/* Simulation Status */}
+        {frame?.metrics?.policy_metrics && controls.policy_type === 'lvt' && (
+          <Paper sx={{ p: 2, mb: 3, backgroundColor: colors.yellowLight }}>
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                Policy Metrics: LVT Collected: ${Math.round(frame.metrics.policy_metrics.total_lvt_collected ?? 0).toLocaleString()},
+                Improvements Required: {frame.metrics.policy_metrics.improvements_required ?? 0}
+              </Typography>
+            </Box>
+          </Paper>
+        )}
+
+        {/* Housing Grid */}
+        <HousingGrid units={frame?.units || []} />
+
+        {/* Event Log */}
+        {frame && (
+          <EventLog
+            events={eventsToShow as any}
+            policyMetrics={frame.metrics.policy_metrics}
+            year={frame.year}
+            period={frame.period}
           />
-        </Box>
+        )}
       </Box>
-
-      {/* Statistics Grid */}
-      <Box 
-        sx={{ 
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(4, 1fr)',
-          },
-          gap: 3,
-          mb: 4,
-        }}
-      >
-        <StatCard 
-          title="Total Units" 
-          value={stats.totalUnits}
-          subtitle="Available Housing Units"
-        />
-        <StatCard 
-          title="Occupied Units" 
-          value={stats.occupiedUnits}
-          subtitle={`${Math.round((stats.occupiedUnits / stats.totalUnits) * 100)}% Occupancy Rate`}
-        />
-        <StatCard 
-          title="Average Rent" 
-          value={`$${stats.averageRent}`}
-          subtitle="Per Month"
-        />
-        <StatCard 
-          title="Total Residents" 
-          value={stats.totalResidents}
-          subtitle="People Housed"
-        />
-      </Box>
-
-      {/* Housing Grid */}
-      {units.length > 0 && (
-        <HousingGrid units={units} />
-      )}
     </Container>
   );
-}
+};
 
 export default SimulationPage; 

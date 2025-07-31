@@ -23,6 +23,10 @@ class RentalUnit:
         self.amenity_score = random.uniform(0, 1)
         self.amenities = self._generate_amenities()
         
+        # Land value characteristics
+        self.base_land_value = self._calculate_base_land_value()
+        self.land_value = self.base_land_value
+        
         # Depreciation and maintenance
         self.depreciation_rate = 0.01  # 1% per period
         self.maintenance_cost = base_rent * 0.1  # 10% of rent
@@ -30,6 +34,53 @@ class RentalUnit:
     def _generate_amenities(self):
         amenity_list = ['parking', 'balcony', 'garden', 'gym', 'pool', 'security']
         return {amenity: random.random() < 0.3 for amenity in amenity_list}
+
+    def _calculate_base_land_value(self):
+        """Calculate the base land value based on location and size"""
+        # Location has strong influence on land value (exponential relationship)
+        location_factor = np.exp(self.location * 2) / np.e  # normalized to 1 at location=0.5
+        
+        # Size affects value linearly
+        size_factor = self.size / 2  # normalized to 1 at size=2
+        
+        # Base value (could be adjusted based on market conditions)
+        base_value = 100000  # Base land value of 100k
+        
+        return base_value * location_factor * size_factor
+
+    def update_land_value(self, market_conditions):
+        """Update land value based on market conditions"""
+        market_demand = market_conditions.get('market_demand', 0.5)
+        price_index = market_conditions.get('price_index', 100) / 100
+        
+        # Market demand affects land value
+        demand_factor = 1 + (market_demand - 0.5)  # Range: 0.5 to 1.5
+        
+        # Price index affects land value
+        price_factor = price_index
+        
+        # Location premiums from market conditions
+        location_premiums = market_conditions.get('location_premiums', {})
+        location_key = round(self.location, 1)
+        location_premium = location_premiums.get(location_key, 0)
+        
+        # Update land value
+        self.land_value = self.base_land_value * demand_factor * price_factor * (1 + location_premium)
+        
+        return self.land_value
+
+    def get_improvement_value(self):
+        """Calculate the value of improvements (buildings) on the land"""
+        # Base improvement value from construction cost
+        base_improvement = self.base_rent * 12 * 10  # Assume 10 years of rent as base improvement value
+        
+        # Quality affects improvement value
+        quality_factor = self.quality * 2  # Range: 0 to 2
+        
+        # Recent renovations increase improvement value
+        renovation_factor = 1 + (self.last_renovation * 0.1 if self.last_renovation > 0 else 0)
+        
+        return base_improvement * quality_factor * renovation_factor
 
     def assign(self, household):
         """Assign a single household to this unit"""
@@ -150,17 +201,16 @@ class Landlord:
         self.units = units
         self.is_compliant = is_compliant
         self.total_profit = 0
-        self.maintenance_budget = 0
-        self.renovation_budget = 0
+        self.wealth = 0  # Initialize wealth
         
-        # Set landlord reference in units
-        for unit in self.units:
+        # Landlord behavior parameters
+        self.greed_factor = random.uniform(0.5, 1.5)  # How aggressively they raise rents
+        self.market_awareness = random.uniform(0.7, 1.0)  # How well they track market conditions
+        self.maintenance_priority = random.uniform(0.3, 1.0)  # How much they prioritize maintenance
+        
+        # Assign self as landlord to all units
+        for unit in units:
             unit.landlord = self
-            
-        # Landlord characteristics
-        self.greed_factor = random.uniform(0.5, 1.5)
-        self.maintenance_willingness = random.uniform(0.3, 0.9)
-        self.market_awareness = random.uniform(0.4, 1.0)
 
     def add_unit(self, unit):
         """Add a unit to this landlord's portfolio"""
@@ -168,42 +218,35 @@ class Landlord:
         unit.landlord = self
 
     def update_rents(self, policy, market_conditions):
+        # Track wealth trend
+        self.wealth_history = getattr(self, 'wealth_history', [])
+        self.wealth_history.append(self.wealth)
+        # Keep last 4 periods (2 years) of history
+        if len(self.wealth_history) > 4:
+            self.wealth_history = self.wealth_history[-4:]
+        
+        # Calculate wealth trend
+        wealth_trend = 0
+        if len(self.wealth_history) >= 2:
+            initial_wealth = self.wealth_history[0]
+            current_wealth = self.wealth_history[-1]
+            if initial_wealth != 0:
+                wealth_trend = (current_wealth - initial_wealth) / initial_wealth
+            else:
+                # If initial wealth was 0, calculate trend based on absolute change
+                wealth_trend = current_wealth / 1000 if current_wealth > 0 else 0
+
+        market_demand = market_conditions.get('market_demand', 0.5)
+        price_index = market_conditions.get('price_index', 100)
+        market_rent = market_conditions.get('market_rent', 1000)
+        market_adjustment = (market_rent - 1000) / 1000  # Normalized market pressure
+
         for unit in self.units:
-            # Calculate market rent
-            market_rent = unit.calculate_market_rent(market_conditions)
-            
-            # Market conditions factors
-            market_demand = market_conditions.get('market_demand', 0.5)
-            vacancy_rate = market_conditions.get('vacancy_rate', 0.1)
-            price_index = market_conditions.get('price_index', 100)
-            
-            # Base market adjustment (can be positive or negative)
-            market_pressure = (market_demand - 0.5) * 2  # -1 to +1 range
-            vacancy_pressure = (0.15 - vacancy_rate) * 2  # Negative when high vacancy
-            
-            # Landlord's market responsiveness
-            market_adjustment = (market_pressure + vacancy_pressure) * 0.5 * self.market_awareness
-            
-            # If unit is vacant, be more responsive to market conditions
             if not unit.occupied:
-                if unit.vacancy_duration > 0:
-                    # Aggressive rent adjustments for vacant units
-                    if market_demand < 0.4 or vacancy_rate > 0.2:
-                        # Market is soft - reduce rents significantly
-                        vacancy_discount = min(0.25, 0.05 + 0.08 * (unit.vacancy_duration / 2))
-                        desired_rent = unit.rent * (1 - vacancy_discount)
-                    elif market_demand > 0.6 and vacancy_rate < 0.1:
-                        # Hot market - can increase even vacant units
-                        desired_rent = unit.rent * (1 + 0.05 * self.greed_factor)
-                    else:
-                        # Moderate market - small adjustment toward market rate
-                        adjustment = market_adjustment * 0.1
-                        desired_rent = unit.rent * (1 + adjustment)
-                    
-                    # But don't go below 50% of base rent or above 200%
-                    desired_rent = max(unit.base_rent * 0.5, min(unit.base_rent * 2.0, desired_rent))
+                # Vacant units: more aggressive pricing based on wealth trend
+                if wealth_trend < -0.1:  # Significant wealth decrease
+                    desired_rent = market_rent * (1 + abs(wealth_trend) * self.greed_factor)
                 else:
-                    # Newly vacant - try market rate first
                     desired_rent = market_rent
             else:
                 # Occupied units: balance market conditions with tenant retention
@@ -212,9 +255,22 @@ class Landlord:
                 # Apply market pressure (can be negative)
                 total_adjustment = base_adjustment + market_adjustment * 0.05
                 
+                # Factor in wealth trend
+                if wealth_trend < -0.1:  # Significant wealth decrease
+                    # More aggressive rent increase when losing money
+                    total_adjustment += abs(wealth_trend) * 0.1 * self.greed_factor
+                elif wealth_trend > 0.1:  # Significant wealth increase
+                    # More conservative with increases when doing well
+                    total_adjustment *= 0.8
+                
                 # Tenant satisfaction consideration
                 if len(unit.tenants) > 0:
                     avg_satisfaction = sum(t.satisfaction for t in unit.tenants) / len(unit.tenants)
+                    avg_tenant_wealth = sum(t.wealth for t in unit.tenants) / len(unit.tenants)
+                    
+                    # Consider tenant's ability to pay
+                    if avg_tenant_wealth < unit.rent * 12:  # Less than a year's rent in savings
+                        total_adjustment = min(total_adjustment, 0.02)  # Cap increase at 2%
                     
                     # If tenants are unhappy, be more conservative
                     if avg_satisfaction < 0.4:
@@ -255,11 +311,17 @@ class Landlord:
                 unit_rent = unit.rent * periods
                 total_rent += unit_rent
                 
+                # Deduct rent from each tenant's wealth
+                rent_per_tenant = unit_rent / len(unit.tenants)
+                for tenant in unit.tenants:
+                    tenant.wealth -= rent_per_tenant
+                
                 # Deduct maintenance costs
                 maintenance = unit.maintenance_cost * periods
                 total_rent -= maintenance
                 
         self.total_profit += total_rent
+        self.wealth = self.total_profit  # Update landlord's wealth based on profit
         return total_rent
 
     def update(self, market_conditions):
