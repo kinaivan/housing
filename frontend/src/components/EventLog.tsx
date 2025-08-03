@@ -1,15 +1,24 @@
 import React from 'react';
-import { Paper, Typography, Box, Stack } from '@mui/material';
+import {
+  Paper,
+  Typography,
+  Box,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Divider,
+  Chip,
+} from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import BuildIcon from '@mui/icons-material/Build';
-import WarningIcon from '@mui/icons-material/Warning';
-import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import ArrowRightAltIcon from '@mui/icons-material/ArrowRightAlt';
-import GroupIcon from '@mui/icons-material/Group';
-import GroupAddIcon from '@mui/icons-material/GroupAdd';
-import GroupRemoveIcon from '@mui/icons-material/GroupRemove';
-import NoMeetingRoomIcon from '@mui/icons-material/NoMeetingRoom';
+import GroupsIcon from '@mui/icons-material/Groups';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import { formatCurrency } from '../utils/formatters';
 
 // Theme colors
 const colors = {
@@ -22,6 +31,7 @@ const colors = {
   vacant: '#dc3545',
   warning: '#ff9800',
   info: '#2196f3',
+  success: '#4caf50',
 };
 
 interface Event {
@@ -41,152 +51,191 @@ interface Event {
   combined_size?: number;
 }
 
-interface EventLogProps {
-  events: Event[];
-  policyMetrics?: {
-    total_lvt_collected?: number;
-    violations_found?: number;
-    improvements_required?: number;
-    lvt_rate?: number;
-  };
-  year: number;
-  period: number;
+interface Move {
+  household_id: number;
+  household_name: string;
+  from_unit_id: number | null;
+  to_unit_id: number | null;
+  type?: string;
 }
 
-const EventLog: React.FC<EventLogProps> = ({ events = [], policyMetrics, year, period }) => {
-  // Count actual events
-  const hasEvents = 
-    events.length > 0 || 
-    (policyMetrics?.violations_found ?? 0) > 0 ||
-    (policyMetrics?.improvements_required ?? 0) > 0 ||
-    (policyMetrics?.total_lvt_collected ?? 0) > 0;
+interface EventLogProps {
+  unitId: number;
+  events: Event[];
+  moves: Move[];
+  period: number;
+  isOccupied: boolean;
+  currentHousehold?: {
+    income: number;
+    satisfaction: number;
+    size: number;
+  };
+}
 
-  // Debug log
-  console.log('EventLog props:', { events, policyMetrics, hasEvents });
+const EventLog: React.FC<EventLogProps> = ({ 
+  unitId, 
+  events, 
+  moves, 
+  period,
+  isOccupied,
+  currentHousehold
+}) => {
+  // Filter events and moves relevant to this unit
+  const relevantEvents = events?.filter(event => 
+    event.from_unit_id === unitId || event.to_unit_id === unitId ||
+    // Include events that happened while the household was in this unit
+    (event.type === 'rent_adjustment' && event.unit_id === unitId) ||
+    (event.type === 'renovation' && event.unit_id === unitId)
+  ) || [];
 
-  const renderEvent = (event: Event) => {
-    switch (event.type) {
-      case 'MOVE':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <PersonIcon sx={{ color: colors.info }} />
-            <Typography variant="body2">
-              {event.household_name} moved from unit {event.from_unit_id} to unit {event.to_unit_id}
-            </Typography>
-          </Box>
-        );
-      
-      case 'MOVE_IN':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <HomeIcon sx={{ color: colors.occupied }} />
-            <Typography variant="body2">
-              {event.household_name} moved into unit {event.to_unit_id}
-            </Typography>
-          </Box>
-        );
+  const relevantMoves = moves?.filter(move => 
+    move.from_unit_id === unitId || move.to_unit_id === unitId
+  ) || [];
 
-      case 'MOVE_OUT':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <NoMeetingRoomIcon sx={{ color: colors.vacant }} />
-            <Typography variant="body2">
-              {event.household_name} moved out of unit {event.from_unit_id}
-            </Typography>
-          </Box>
-        );
+  // Combine and sort all events chronologically
+  const allEvents = [...relevantEvents, ...relevantMoves]
+    .sort((a, b) => {
+      // Sort by period if available, otherwise maintain relative order
+      const periodA = (a as any).period || 0;
+      const periodB = (b as any).period || 0;
+      return periodB - periodA;
+    });
 
-      case 'EVICTED':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <WarningIcon sx={{ color: colors.warning }} />
-            <Typography variant="body2">
-              {event.household_name} was evicted from unit {event.from_unit_id} 
-              ({event.reason}{`, rent burden: ${Math.round(((event.rent_burden ?? 0) * 100))}%`})
-            </Typography>
-          </Box>
-        );
-
-      case 'HOUSEHOLD_BREAKUP':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <GroupRemoveIcon sx={{ color: colors.warning }} />
-            <Typography variant="body2">
-              Household split in unit {event.from_unit_id}: {event.original_size} → {event.remaining_size} + {event.new_household_size} people
-            </Typography>
-          </Box>
-        );
-
-      case 'HOUSEHOLD_MERGER':
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <GroupAddIcon sx={{ color: colors.occupied }} />
-            <Typography variant="body2">
-              Households merged in unit {event.from_unit_id}: {event.original_size} + {event.other_household_size} → {event.combined_size} people
-            </Typography>
-          </Box>
-        );
-
-      default:
-        return null;
+  const getEventIcon = (event: Event | Move) => {
+    if ('type' in event && event.type) {
+      switch (event.type) {
+        case 'household_split':
+          return <GroupsIcon sx={{ color: colors.warning }} />;
+        case 'household_merge':
+          return <GroupsIcon sx={{ color: colors.success }} />;
+        case 'rent_adjustment':
+          return <AttachMoneyIcon sx={{ color: colors.info }} />;
+        case 'renovation':
+          return <BuildIcon sx={{ color: colors.warning }} />;
+        default:
+          return <PersonIcon sx={{ color: colors.info }} />;
+      }
     }
+    // Handle moves
+    if (event.to_unit_id === unitId) {
+      return <ArrowDownwardIcon sx={{ color: colors.success }} />;
+    }
+    if (event.from_unit_id === unitId) {
+      return <ArrowUpwardIcon sx={{ color: colors.vacant }} />;
+    }
+    return <ArrowForwardIcon sx={{ color: colors.info }} />;
+  };
+
+  const getEventDescription = (event: Event | Move) => {
+    if ('type' in event && event.type) {
+      switch (event.type) {
+        case 'household_split':
+          return `Household "${event.household_name}" split into two households (Original size: ${event.original_size}, Remaining size: ${event.remaining_size})`;
+        case 'household_merge':
+          return `Household "${event.household_name}" merged with another household (Combined size: ${event.combined_size})`;
+        case 'rent_adjustment':
+          return `Monthly rent was adjusted - New rent burden: ${event.rent_burden?.toFixed(1)}% of household income`;
+        case 'renovation':
+          return 'Property underwent renovations to improve quality';
+        case 'HOUSING_SEARCH':
+          return `Household "${event.household_name}" searched for housing - ${event.reason}`;
+        default:
+          return `${event.type} event for household "${event.household_name}"`;
+      }
+    }
+    // Handle moves
+    if (event.to_unit_id === unitId) {
+      return `Household "${event.household_name}" moved into this property`;
+    }
+    if (event.from_unit_id === unitId) {
+      return `Household "${event.household_name}" moved out of this property`;
+    }
+    return `Household "${event.household_name}" relocated to a different property`;
   };
 
   return (
-    <Paper sx={{ p: 2, mt: 3, backgroundColor: colors.white }}>
-      <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
-        Events Log - Year {year}, Period {period}
-      </Typography>
-      
-      <Stack spacing={1}>
-        {/* Events */}
-        {events.map((event, index) => (
-          <React.Fragment key={index}>
-            {renderEvent(event)}
-          </React.Fragment>
-        ))}
+    <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600, color: colors.textDark }}>
+          Property History
+        </Typography>
+        <Chip 
+          icon={<HomeIcon />}
+          label={isOccupied ? 'Currently Occupied' : 'Currently Vacant'}
+          sx={{ 
+            backgroundColor: isOccupied ? colors.occupied : colors.vacant,
+            color: 'white',
+            fontWeight: 500,
+          }}
+        />
+      </Box>
 
-        {/* Policy Events */}
-        {policyMetrics && (
-          <>
-            {(policyMetrics.violations_found ?? 0) > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <WarningIcon sx={{ color: colors.warning }} />
-                <Typography variant="body2">
-                  {policyMetrics.violations_found} housing violations found
-                </Typography>
-              </Box>
-            )}
-            
-            {(policyMetrics.improvements_required ?? 0) > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <BuildIcon sx={{ color: colors.occupied }} />
-                <Typography variant="body2">
-                  {policyMetrics.improvements_required} units required improvements
-                </Typography>
-              </Box>
-            )}
-
-            {(policyMetrics.total_lvt_collected ?? 0) > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <AccountBalanceIcon sx={{ color: colors.info }} />
-                <Typography variant="body2">
-                  ${Math.round((policyMetrics.total_lvt_collected || 0)).toLocaleString()} collected in Land Value Tax
-                </Typography>
-              </Box>
-            )}
-          </>
-        )}
-
-        {/* No Events Message */}
-        {!hasEvents && (
-          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            No events this period
+      {/* Current Occupants Section */}
+      {isOccupied && currentHousehold && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+            Current Residents
           </Typography>
-        )}
-      </Stack>
+          <Box sx={{ 
+            p: 2, 
+            backgroundColor: colors.yellowLight, 
+            borderRadius: 1,
+            border: `1px solid ${colors.yellowDark}`,
+          }}>
+            <Box sx={{ display: 'flex', gap: 3 }}>
+              <Box>
+                <Typography variant="body2" color="textSecondary">Household Size</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  {currentHousehold.size} people
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="body2" color="textSecondary">Annual Income</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  {formatCurrency(currentHousehold.income)}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="body2" color="textSecondary">Satisfaction</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  {(currentHousehold.satisfaction * 100).toFixed(0)}%
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
+      <Divider sx={{ my: 2 }} />
+
+      {/* Events List */}
+      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+        Event History
+      </Typography>
+      {allEvents.length > 0 ? (
+        <List>
+          {allEvents.map((event, index) => (
+            <React.Fragment key={index}>
+              <ListItem>
+                <ListItemIcon>
+                  {getEventIcon(event)}
+                </ListItemIcon>
+                <ListItemText
+                  primary={getEventDescription(event)}
+                  secondary={`Period ${(event as any).period || period}${event.reason ? ` - ${event.reason}` : ''}`}
+                />
+              </ListItem>
+              {index < allEvents.length - 1 && <Divider />}
+            </React.Fragment>
+          ))}
+        </List>
+      ) : (
+        <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', py: 2 }}>
+          No events recorded yet
+        </Typography>
+      )}
     </Paper>
   );
 };
 
-export default EventLog; 
+export default EventLog;

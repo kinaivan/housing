@@ -198,12 +198,24 @@ class Simulation:
                 new_unit = household.find_new_unit(self.rental_market, self.policy)
                 if new_unit:
                     household.move_to(new_unit, year, period)
-                elif household.housed:
-                    # Couldn't find affordable housing, become unhoused
-                    if household.contract:
-                        household.contract.unit.remove_tenant(household)
-                        household.contract = None
-                    household.housed = False
+                else:
+                    # Log failed attempt to find housing
+                    failed_search_event = {
+                        "type": "HOUSING_SEARCH",
+                        "household_id": household.id,
+                        "household_name": household.name,
+                        "from_unit_id": current_unit_id,
+                        "to_unit_id": None,
+                        "reason": "No suitable units found" if not household.housed else "Became unhoused - no affordable options"
+                    }
+                    self.events_this_period.append(failed_search_event)
+                    
+                    # If currently housed, become unhoused
+                    if household.housed:
+                        if household.contract:
+                            household.contract.unit.remove_tenant(household)
+                            household.contract = None
+                        household.housed = False
 
             # Get new state
             new_unit = household.contract.unit if household.contract else None
@@ -338,7 +350,6 @@ class Simulation:
             vacancy_adjustment = -min(0.15, unit.vacancy_duration * 0.03)  # Max -15%
         
         # Renovation bonus (smaller impact)
-        renovation_adjustment = 0
         if hasattr(unit, 'last_renovation') and unit.last_renovation > 0:
             # Recent renovations increase property value
             renovation_adjustment = min(0.1, unit.last_renovation * 0.008)  # Max +10%

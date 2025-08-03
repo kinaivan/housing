@@ -491,32 +491,16 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
           const toX = toRect.left + toRect.width / 2 - gridRect.left;
           const toY = toRect.top + toRect.height / 2 - gridRect.top;
 
-          // Calculate control points for curved arrow
-          const dx = toX - fromX;
-          const dy = toY - fromY;
-          const midX = (fromX + toX) / 2;
-          const midY = (fromY + toY) / 2;
-          const curvature = 0.5;
-          const controlX = midX - dy * curvature;
-          const controlY = midY + dx * curvature;
-
-          // Create arrow path with quadratic curve
-          const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          arrow.setAttribute('d', `M ${fromX} ${fromY} Q ${controlX} ${controlY} ${toX} ${toY}`);
+          // Create straight line arrow
+          const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          arrow.setAttribute('x1', String(fromX));
+          arrow.setAttribute('y1', String(fromY));
+          arrow.setAttribute('x2', String(toX));
+          arrow.setAttribute('y2', String(toY));
           arrow.setAttribute('stroke', '#28a745'); // Green color
           arrow.setAttribute('stroke-width', '3');
           arrow.setAttribute('marker-end', 'url(#arrowhead)');
-          arrow.setAttribute('fill', 'none');
           arrow.setAttribute('opacity', '0.8');
-          
-          // Add glow effect
-          const glow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          glow.setAttribute('d', `M ${fromX} ${fromY} Q ${controlX} ${controlY} ${toX} ${toY}`);
-          glow.setAttribute('stroke', '#28a745'); // Green color
-          glow.setAttribute('stroke-width', '6');
-          glow.setAttribute('filter', 'url(#glow)');
-          glow.setAttribute('fill', 'none');
-          glow.setAttribute('opacity', '0.3');
 
           // Add filter for glow effect
           const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
@@ -538,7 +522,10 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
           //fragment.appendChild(glow);
           fragment.appendChild(arrow);
 
-          // Add household name label
+          // Add household name label at midpoint of the line
+          const midX = (fromX + toX) / 2;
+          const midY = (fromY + toY) / 2;
+          
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', String(midX));
           text.setAttribute('y', String(midY - 10));
@@ -548,16 +535,16 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
           text.textContent = move.household_name;
           
           // Add white background to text for better readability
-          const textBackground = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          const textBox = text.getBBox();
-          textBackground.setAttribute('x', String(textBox.x - 2));
-          textBackground.setAttribute('y', String(textBox.y - 2));
-          textBackground.setAttribute('width', String(textBox.width + 4));
-          textBackground.setAttribute('height', String(textBox.height + 4));
-          textBackground.setAttribute('fill', 'white');
-          textBackground.setAttribute('opacity', '0.8');
+          const textBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          const textWidth = text.getComputedTextLength ? text.getComputedTextLength() : 50;
+          textBg.setAttribute('x', String(midX - textWidth/2 - 2));
+          textBg.setAttribute('y', String(midY - 22));
+          textBg.setAttribute('width', String(textWidth + 4));
+          textBg.setAttribute('height', '16');
+          textBg.setAttribute('fill', 'white');
+          textBg.setAttribute('opacity', '0.8');
           
-          fragment.appendChild(textBackground);
+          fragment.appendChild(textBg);
           fragment.appendChild(text);
         }
       });
@@ -578,84 +565,147 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
 
   return (
     <Box sx={{ display: 'flex', gap: 3, p: 3 }}>
-      {/* Unhoused households sidebar */}
-      {frame?.unhoused_households && frame.unhoused_households.length > 0 && (
-        <Box
-          sx={{
-            width: 250,
-            flexShrink: 0,
-            p: 2,
-            bgcolor: 'background.paper',
-            borderRadius: 1,
-            boxShadow: 1,
-          }}
-        >
-          <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
-            Looking for Housing ({frame.unhoused_households.length})
-          </Typography>
+      {/* Unhoused households sidebar - always visible */}
+      <Box
+        sx={{
+          width: 250,
+          flexShrink: 0,
+          p: 2,
+          bgcolor: 'background.paper',
+          borderRadius: 1,
+          boxShadow: 1,
+        }}
+      >
+        <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
+          Looking for Housing ({frame?.unhoused_households?.length || 0})
+        </Typography>
+        {frame?.unhoused_households && frame.unhoused_households.length > 0 ? (
           <Stack spacing={1}>
             {frame.unhoused_households.map(household => (
               <UnhousedHouseholdCard key={household.id} {...household} />
             ))}
           </Stack>
-        </Box>
-      )}
+        ) : (
+          <Box sx={{ 
+            p: 2, 
+            textAlign: 'center', 
+            bgcolor: colors.yellowLight,
+            borderRadius: 1,
+            border: `1px solid ${colors.yellowDark}`
+          }}>
+            <Typography variant="body2" sx={{ color: colors.textDark }}>
+              No households currently looking for housing
+            </Typography>
+          </Box>
+        )}
+      </Box>
 
       {/* Main housing grid with move arrows overlay */}
       <Box sx={{ position: 'relative', flexGrow: 1 }}>
-        <Box
-          ref={gridRef}
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: 'repeat(auto-fit, minmax(130px, 1fr))',
-              sm: 'repeat(auto-fit, minmax(150px, 1fr))',
-              md: 'repeat(auto-fit, minmax(170px, 1fr))',
-            },
-            gap: 2,
-            position: 'relative',
-          }}
-        >
-          {units.map((unit) => (
-            <Box key={unit.id} data-unit-id={unit.id}>
-              <House
-                id={unit.id}
-                occupants={unit.occupants}
-                rent={unit.rent}
-                is_occupied={unit.is_occupied}
-                quality={unit.quality}
-                lastRenovation={unit.lastRenovation}
-                household={unit.household}
-              />
+        {/* Legends */}
+        <Paper elevation={1} sx={{ p: 2, mb: 3 }}>
+          {/* Occupancy Status */}
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: colors.textDark, mb: 1 }}>
+              Occupancy Status
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <HomeIcon sx={{ color: colors.occupied }} />
+                <Typography variant="body2">Occupied</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <HomeIcon sx={{ color: colors.vacant }} />
+                <Typography variant="body2">Vacant</Typography>
+              </Box>
             </Box>
-          ))}
-        </Box>
+          </Box>
 
-        {/* SVG overlay for move arrows */}
-        <svg
-          ref={moveArrowsRef}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            pointerEvents: 'none',
-          }}
-        >
-          <defs>
-            <marker
-              id="arrowhead"
-              markerWidth="10"
-              markerHeight="7"
-              refX="9"
-              refY="3.5"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" fill="#28a745" />
-            </marker>
-          </defs>
-        </svg>
+          {/* Quality Indicators */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: colors.textDark, mb: 1 }}>
+            Property Quality Indicators
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 20, height: 20, border: '2px solid #4caf50', borderRadius: 1 }} />
+            <Typography variant="body2">Excellent (80-100%)</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 20, height: 20, border: '2px solid #8bc34a', borderRadius: 1 }} />
+            <Typography variant="body2">Good (60-80%)</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 20, height: 20, border: '2px solid #ffeb3b', borderRadius: 1 }} />
+            <Typography variant="body2">Fair (40-60%)</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 20, height: 20, border: '2px solid #ff9800', borderRadius: 1 }} />
+            <Typography variant="body2">Poor (20-40%)</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 20, height: 20, border: '2px solid #f44336', borderRadius: 1 }} />
+            <Typography variant="body2">Very Poor (0-20%)</Typography>
+          </Box>
+        </Paper>
+
+        {/* Container for grid and arrows */}
+        <Box sx={{ position: 'relative' }}>
+          {/* SVG overlay for move arrows */}
+          <svg
+            ref={moveArrowsRef}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          >
+            <defs>
+              <marker
+                id="arrowhead"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
+                <polygon points="0 0, 10 3.5, 0 7" fill="#28a745" />
+              </marker>
+            </defs>
+          </svg>
+
+          {/* Grid */}
+          <Box
+            ref={gridRef}
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: 'repeat(auto-fit, minmax(130px, 1fr))',
+                sm: 'repeat(auto-fit, minmax(150px, 1fr))',
+                md: 'repeat(auto-fit, minmax(170px, 1fr))',
+              },
+              gap: 2,
+              position: 'relative',
+              zIndex: 0,
+            }}
+          >
+            {units.map((unit) => (
+              <Box key={unit.id} data-unit-id={unit.id}>
+                <House
+                  id={unit.id}
+                  occupants={unit.occupants}
+                  rent={unit.rent}
+                  is_occupied={unit.is_occupied}
+                  quality={unit.quality}
+                  lastRenovation={unit.lastRenovation}
+                  household={unit.household}
+                />
+              </Box>
+            ))}
+          </Box>
+        </Box>
       </Box>
     </Box>
   );

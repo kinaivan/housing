@@ -155,8 +155,18 @@ function LandlordPage() {
     updateInput(name, value as number);
   };
 
+  const [focusedFields, setFocusedFields] = useState<{ [key: string]: boolean }>({});
+
   const handleInputChange = (name: keyof typeof inputs) => (event: React.ChangeEvent<HTMLInputElement>) => {
     updateInput(name, Number(event.target.value));
+  };
+
+  const handleInputFocus = (name: string) => () => {
+    setFocusedFields(prev => ({ ...prev, [name]: true }));
+  };
+
+  const handleInputBlur = (name: string) => () => {
+    setFocusedFields(prev => ({ ...prev, [name]: false }));
   };
 
   const handleLocationChange = (event: SelectChangeEvent) => {
@@ -266,8 +276,10 @@ function LandlordPage() {
               fullWidth
               label="Purchase Price (€)"
               type="number"
-              value={inputs.purchasePrice}
+              value={focusedFields['purchasePrice'] ? '' : inputs.purchasePrice}
               onChange={handleInputChange('purchasePrice')}
+              onFocus={handleInputFocus('purchasePrice')}
+              onBlur={handleInputBlur('purchasePrice')}
               margin="normal"
             />
 
@@ -288,8 +300,10 @@ function LandlordPage() {
               fullWidth
               label="Point System Rent (€)"
               type="number"
-              value={inputs.pointSystemRent}
+              value={focusedFields['pointSystemRent'] ? '' : inputs.pointSystemRent}
               onChange={handleInputChange('pointSystemRent')}
+              onFocus={handleInputFocus('pointSystemRent')}
+              onBlur={handleInputBlur('pointSystemRent')}
               margin="normal"
               helperText="Maximum rent allowed by the point system"
             />
@@ -298,14 +312,16 @@ function LandlordPage() {
               fullWidth
               label="Market Rent (€)"
               type="number"
-              value={inputs.monthlyRent}
+              value={focusedFields['monthlyRent'] ? '' : inputs.monthlyRent}
               onChange={handleInputChange('monthlyRent')}
+              onFocus={handleInputFocus('monthlyRent')}
+              onBlur={handleInputBlur('monthlyRent')}
               margin="normal"
               helperText="Actual market rent in the area"
             />
 
             <Typography gutterBottom>
-              Down Payment: {inputs.downPayment}%
+              Down Payment: {inputs.downPayment}% ({formatCurrency(inputs.purchasePrice * (inputs.downPayment / 100))})
             </Typography>
             <StyledSlider
               value={inputs.downPayment}
@@ -324,7 +340,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Interest Rate: {inputs.interestRate}%
+              Interest Rate: {inputs.interestRate}% ({formatCurrency((inputs.purchasePrice * (1 - inputs.downPayment / 100)) * (inputs.interestRate / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.interestRate}
@@ -359,7 +375,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Property Tax Rate: {inputs.propertyTax}%
+              Property Tax Rate: {inputs.propertyTax}% ({formatCurrency(inputs.purchasePrice * (inputs.propertyTax / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.propertyTax}
@@ -377,7 +393,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Maintenance & Management: {inputs.maintenanceRate}%
+              Maintenance & Management: {inputs.maintenanceRate}% ({formatCurrency(inputs.purchasePrice * (inputs.maintenanceRate / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.maintenanceRate}
@@ -395,7 +411,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Vacancy Rate: {inputs.vacancyRate}%
+              Vacancy Rate: {inputs.vacancyRate}% ({formatCurrency(inputs.monthlyRent * 12 * (inputs.vacancyRate / 100))} lost per year)
             </Typography>
             <StyledSlider
               value={inputs.vacancyRate}
@@ -413,7 +429,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Insurance Rate: {inputs.insuranceRate}%
+              Insurance Rate: {inputs.insuranceRate}% ({formatCurrency(inputs.purchasePrice * (inputs.insuranceRate / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.insuranceRate}
@@ -431,7 +447,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Utility Rate: {inputs.utilityRate}%
+              Utility Rate: {inputs.utilityRate}% ({formatCurrency(inputs.monthlyRent * 12 * (inputs.utilityRate / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.utilityRate}
@@ -449,7 +465,7 @@ function LandlordPage() {
             />
 
             <Typography gutterBottom>
-              Annual Appreciation Rate: {inputs.appreciationRate}%
+              Annual Appreciation Rate: {inputs.appreciationRate}% ({formatCurrency(inputs.purchasePrice * (inputs.appreciationRate / 100))} per year)
             </Typography>
             <StyledSlider
               value={inputs.appreciationRate}

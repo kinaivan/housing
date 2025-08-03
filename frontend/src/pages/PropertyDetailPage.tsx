@@ -11,30 +11,12 @@ import {
   Card,
   CardContent,
   Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+
   Stack,
   LinearProgress,
   Alert,
 } from '@mui/material';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts';
+import EventLog from '../components/EventLog';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
@@ -45,7 +27,7 @@ import SentimentSatisfiedIcon from '@mui/icons-material/SentimentSatisfied';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useSimulation } from '../contexts/SimulationContext';
@@ -209,27 +191,36 @@ const PropertyDetailPage = () => {
   const analytics = useMemo(() => {
     if (!unit || unitHistory.length === 0) return null;
 
-    const recentHistory = unitHistory.slice(-10); // Last 10 periods
+    // Get last 12 periods (or all if less than 12)
+    const recentHistory = unitHistory.slice(-12);
+    
+    // Calculate average occupancy over recent periods
     const avgOccupancy = recentHistory.reduce((sum, entry) => sum + entry.occupancyRate, 0) / recentHistory.length;
-    const avgRent = recentHistory.reduce((sum, entry) => sum + entry.rent, 0) / recentHistory.length;
+
+    // Calculate rent growth over the last 12 periods
     const rentGrowth = recentHistory.length > 1 
       ? ((recentHistory[recentHistory.length - 1].rent - recentHistory[0].rent) / recentHistory[0].rent) * 100 
       : 0;
     
+    // Calculate vacancy rate over all history
     const vacantPeriods = unitHistory.filter(entry => entry.occupancyRate === 0).length;
     const totalPeriods = unitHistory.length;
     const vacancyRate = totalPeriods > 0 ? (vacantPeriods / totalPeriods) * 100 : 0;
 
-    const currentRentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
+    // Calculate total revenue (only count rent when occupied)
+    const totalRevenue = unitHistory.reduce((sum, entry) => {
+      return sum + (entry.occupancyRate > 0 ? entry.rent : 0);
+    }, 0);
     
     return {
       avgOccupancy,
-      avgRent,
       rentGrowth,
       vacancyRate,
-      currentRentBurden,
-      totalRevenue: unitHistory.reduce((sum, entry) => sum + (entry.occupancyRate > 0 ? entry.rent : 0), 0),
-      occupancyStreak: unit.is_occupied ? unitHistory.reverse().findIndex(entry => entry.occupancyRate === 0) : 0,
+      totalRevenue,
+      // Current occupancy streak (number of consecutive occupied periods)
+      occupancyStreak: unit.is_occupied 
+        ? [...unitHistory].reverse().findIndex(entry => entry.occupancyRate === 0)
+        : 0,
     };
   }, [unit, unitHistory]);
 
@@ -253,7 +244,7 @@ const PropertyDetailPage = () => {
   const currentRentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
   const isAffordable = currentRentBurden <= 30;
   const qualityScore = (unit.quality || 0) * 100;
-  const satisfactionScore = unit.household ? (unit.household.satisfaction || 0) * 100 : 0;
+  const satisfactionScore = unit.household?.satisfaction !== undefined ? unit.household.satisfaction * 100 : 0;
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -344,7 +335,7 @@ const PropertyDetailPage = () => {
             title="Occupants"
             value={unit.occupants}
             icon={<PersonIcon />}
-            subtitle={unit.is_occupied ? `${unit.household?.size || 0} household size` : 'Vacant'}
+            subtitle={unit.is_occupied ? `${unit.household?.size || 0} person household` : 'Vacant'}
             color={colors.occupied}
           />
         </Grid>
@@ -489,197 +480,15 @@ const PropertyDetailPage = () => {
         </Paper>
       )}
 
-      {/* Historical Charts */}
-      <Accordion defaultExpanded sx={{ mb: 2 }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>Occupancy & Rent History</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Grid container spacing={3}>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Occupancy Over Time
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <AreaChart data={unitHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip formatter={(value) => [`${value}%`, 'Occupancy']} />
-                    <Area
-                      type="stepAfter"
-                      dataKey="occupancyRate"
-                      stroke={colors.occupied}
-                      fill={colors.occupied}
-                      fillOpacity={0.3}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </Box>
-            </Grid>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Rent History
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <LineChart data={unitHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => [`$${value}`, 'Rent']} />
-                    <Line
-                      type="monotone"
-                      dataKey="rent"
-                      stroke={colors.info}
-                      strokeWidth={3}
-                      dot={{ fill: colors.info, strokeWidth: 2, r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
-            </Grid>
-          </Grid>
-        </AccordionDetails>
-      </Accordion>
-
-      <Accordion sx={{ mb: 2 }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>Quality & Satisfaction Metrics</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Grid container spacing={3}>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Property Quality
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <LineChart data={unitHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip formatter={(value) => [`${value}%`, 'Quality']} />
-                    <Line
-                      type="monotone"
-                      dataKey="quality"
-                      stroke={colors.warning}
-                      strokeWidth={3}
-                      dot={{ fill: colors.warning, strokeWidth: 2, r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
-            </Grid>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Tenant Satisfaction
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <LineChart data={unitHistory.filter(entry => entry.occupancyRate > 0)}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis domain={[0, 100]} />
-                    <Tooltip 
-                      formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Satisfaction']}
-                      labelFormatter={(period) => `Period ${period}`}
-                    />
-                    <Legend />
-                    <Line
-                      name="Tenant Satisfaction"
-                      type="monotone"
-                      dataKey="satisfaction"
-                      stroke={colors.info}
-                      strokeWidth={3}
-                      dot={{ fill: colors.info, strokeWidth: 2, r: 4 }}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
-              {unitHistory.length > 0 && !unit.is_occupied && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
-                  Unit is currently vacant - showing historical satisfaction data
-                </Typography>
-              )}
-            </Grid>
-          </Grid>
-        </AccordionDetails>
-      </Accordion>
-
-      <Accordion>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>Financial Analysis</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Grid container spacing={3}>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Rent Burden History
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <AreaChart data={unitHistory.filter(entry => entry.rentBurden > 0)}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => [`${value}%`, 'Rent Burden']} />
-                    <Area
-                      type="monotone"
-                      dataKey="rentBurden"
-                      stroke={colors.vacant}
-                      fill={colors.vacant}
-                      fillOpacity={0.3}
-                    />
-                    {/* Recommended 30% line */}
-                    <Line
-                      type="monotone"
-                      dataKey={() => 30}
-                      stroke="#000"
-                      strokeDasharray="5 5"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </Box>
-            </Grid>
-            <Grid item xs={12} lg={6}>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                Income vs Rent
-              </Typography>
-              <Box sx={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <AreaChart data={unitHistory.filter(entry => entry.income > 0)}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis />
-                    <Tooltip />
-                    <Area
-                      type="monotone"
-                      dataKey="income"
-                      stackId="1"
-                      stroke={colors.success}
-                      fill={colors.success}
-                      fillOpacity={0.6}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey={(entry) => entry.rent * 12}
-                      stackId="2"
-                      stroke={colors.info}
-                      fill={colors.info}
-                      fillOpacity={0.8}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </Box>
-            </Grid>
-          </Grid>
-        </AccordionDetails>
-      </Accordion>
+      {/* Event Log */}
+      <EventLog 
+        unitId={unit.id}
+        events={frame?.events || []}
+        moves={frame?.moves || []}
+        period={frame?.period || 0}
+        isOccupied={unit.is_occupied}
+        currentHousehold={unit.household}
+      />
     </Container>
   );
 };

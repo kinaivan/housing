@@ -92,6 +92,13 @@ class RentalUnit:
         self.tenants = [household]
         self.occupied = True
         self.vacancy_duration = 0
+        # Update occupants count based on household size
+        self.occupants = household.size
+        
+        # If unit was previously vacant, gradually restore rent to market levels
+        if hasattr(self, 'rent_reduction_history') and self.rent_reduction_history:
+            # Start restoring rent to base rent over time
+            self.rent = min(self.base_rent, self.rent * 1.05)  # 5% increase per occupancy
 
     def assign_multiple(self, households):
         """Assign multiple households to share this unit"""
@@ -102,6 +109,12 @@ class RentalUnit:
         self.tenant = households[0]  # Primary tenant for compatibility
         self.occupied = True
         self.vacancy_duration = 0
+        # Update occupants count based on total household sizes
+        self.occupants = sum(h.size for h in households)
+        # If unit was previously vacant, gradually restore rent to market levels
+        if hasattr(self, 'rent_reduction_history') and self.rent_reduction_history:
+            # Start restoring rent to base rent over time
+            self.rent = min(self.base_rent, self.rent * 1.05)  # 5% increase per occupancy
 
     def add_tenant(self, household):
         """Add an additional tenant to share the unit"""
@@ -116,11 +129,14 @@ class RentalUnit:
         """Remove a specific tenant from shared unit"""
         if household in self.tenants:
             self.tenants.remove(household)
+            # Update occupants count
+            self.occupants = sum(h.size for h in self.tenants)
             
         if not self.tenants:
             # Unit becomes vacant
             self.tenant = None
             self.occupied = False
+            self.occupants = 0
         elif self.tenant == household:
             # Update primary tenant
             self.tenant = self.tenants[0]
@@ -130,6 +146,7 @@ class RentalUnit:
         self.tenant = None
         self.tenants = []
         self.occupied = False
+        self.occupants = 0
 
     def get_total_household_size(self):
         """Get total number of people living in the unit"""
@@ -242,12 +259,14 @@ class Landlord:
         market_adjustment = (market_rent - 1000) / 1000  # Normalized market pressure
 
         for unit in self.units:
+            # Economic cycle effects
+            cycle_adjustment = np.sin(price_index / 20) * 0.01  # Small cyclical adjustment
+
             if not unit.occupied:
-                # Vacant units: more aggressive pricing based on wealth trend
-                if wealth_trend < -0.1:  # Significant wealth decrease
-                    desired_rent = market_rent * (1 + abs(wealth_trend) * self.greed_factor)
-                else:
-                    desired_rent = market_rent
+                # Apply vacancy-based rent reduction strategy
+                self._apply_vacancy_rent_reduction(unit, market_conditions, wealth_trend)
+                # Apply cycle adjustment to the reduced rent
+                unit.rent *= (1 + cycle_adjustment)
             else:
                 # Occupied units: balance market conditions with tenant retention
                 base_adjustment = 0.02 * self.greed_factor * self.market_awareness
@@ -295,13 +314,110 @@ class Landlord:
                     max_increase = 0.10  # 10% default max increase
                     if total_adjustment > 0:
                         desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
-            
-            # Economic cycle effects
-            cycle_adjustment = np.sin(price_index / 20) * 0.01  # Small cyclical adjustment
-            desired_rent *= (1 + cycle_adjustment)
-            
-            # Apply the rent change with reasonable bounds
-            unit.rent = max(unit.base_rent * 0.4, min(unit.base_rent * 2.5, desired_rent))
+                
+                # Apply cycle adjustment
+                desired_rent *= (1 + cycle_adjustment)
+                
+                # Apply the rent change with reasonable bounds
+                unit.rent = max(unit.base_rent * 0.4, min(unit.base_rent * 2.5, desired_rent))
+
+    def _apply_vacancy_rent_reduction(self, unit, market_conditions, wealth_trend):
+        """
+        Apply strategic rent reductions for vacant units to attract tenants.
+        This method implements a progressive rent reduction strategy based on:
+        - Vacancy duration (longer vacancies = bigger reductions)
+        - Market conditions (soft market = more aggressive reductions)
+        - Landlord's financial situation (wealth trend affects strategy)
+        - Unit characteristics (quality, location, etc.)
+        """
+        vacancy_duration = unit.vacancy_duration
+        market_demand = market_conditions.get('market_demand', 0.5)
+        vacancy_rate = market_conditions.get('vacancy_rate', 0.1)
+        
+        # Base reduction factors
+        duration_factor = min(0.25, vacancy_duration * 0.02)  # Max 25% reduction after ~12 periods
+        market_factor = (0.5 - market_demand) * 0.2  # Soft market = more reduction
+        vacancy_factor = vacancy_rate * 0.3  # High vacancy rate = more reduction
+        
+        # Landlord-specific factors
+        wealth_pressure = max(0, -wealth_trend * 0.1)  # Financial pressure increases reduction
+        landlord_aggressiveness = (1.5 - self.greed_factor) * 0.1  # Less greedy = more reduction
+        
+        # Unit-specific factors
+        quality_factor = (0.7 - unit.quality) * 0.1  # Lower quality = more reduction needed
+        location_factor = (0.5 - unit.location_score) * 0.05  # Less desirable location = more reduction
+        
+        # Calculate total reduction percentage
+        total_reduction = (
+            duration_factor + 
+            market_factor + 
+            vacancy_factor + 
+            wealth_pressure + 
+            landlord_aggressiveness + 
+            quality_factor + 
+            location_factor
+        )
+        
+        # Apply progressive reduction based on vacancy duration
+        if vacancy_duration >= 12:  # After 1 year (assuming 6-month periods)
+            # More aggressive reduction for long-term vacancies
+            total_reduction *= 1.5
+        elif vacancy_duration >= 6:  # After 6 months
+            # Moderate reduction
+            total_reduction *= 1.2
+        elif vacancy_duration >= 3:  # After 3 months
+            # Small reduction
+            total_reduction *= 1.0
+        else:
+            # Minimal reduction for short vacancies
+            total_reduction *= 0.5
+        
+        # Cap the maximum reduction at 40% of base rent
+        max_reduction = 0.4
+        total_reduction = min(total_reduction, max_reduction)
+        
+        # Calculate new rent
+        target_rent = unit.base_rent * (1 - total_reduction)
+        
+        # Ensure rent doesn't go below minimum threshold (60% of base rent)
+        min_rent = unit.base_rent * 0.6
+        target_rent = max(target_rent, min_rent)
+        
+        # Apply the reduction gradually (not all at once)
+        current_rent = unit.rent
+        max_change_per_period = 0.1  # Maximum 10% change per period
+        
+        if target_rent < current_rent:
+            # Reduce rent
+            reduction_amount = current_rent - target_rent
+            max_reduction_this_period = current_rent * max_change_per_period
+            actual_reduction = min(reduction_amount, max_reduction_this_period)
+            unit.rent = current_rent - actual_reduction
+        else:
+            # If target rent is higher than current, don't increase for vacant units
+            # This prevents rent increases on vacant units
+            pass
+        
+        # Update vacancy duration
+        unit.vacancy_duration += 1
+        
+        # Log the rent reduction decision (for debugging/monitoring)
+        if hasattr(unit, 'rent_reduction_history'):
+            unit.rent_reduction_history.append({
+                'period': unit.vacancy_duration,
+                'old_rent': current_rent,
+                'new_rent': unit.rent,
+                'reduction_factor': total_reduction,
+                'reason': f"Vacancy duration: {vacancy_duration}, Market demand: {market_demand:.2f}"
+            })
+        else:
+            unit.rent_reduction_history = [{
+                'period': unit.vacancy_duration,
+                'old_rent': current_rent,
+                'new_rent': unit.rent,
+                'reduction_factor': total_reduction,
+                'reason': f"Vacancy duration: {vacancy_duration}, Market demand: {market_demand:.2f}"
+            }]
 
     def collect_rent(self, periods=1):
         total_rent = 0
@@ -348,11 +464,27 @@ class Landlord:
         avg_rent = np.mean([u.rent for u in self.units])
         avg_quality = np.mean([u.quality for u in self.units])
         
+        # Calculate vacancy statistics
+        vacant_units = [u for u in self.units if not u.occupied]
+        avg_vacancy_duration = np.mean([u.vacancy_duration for u in vacant_units]) if vacant_units else 0
+        
+        # Calculate rent reduction statistics
+        rent_reductions = []
+        for unit in vacant_units:
+            if hasattr(unit, 'rent_reduction_history') and unit.rent_reduction_history:
+                latest_reduction = unit.rent_reduction_history[-1]
+                rent_reductions.append(latest_reduction['reduction_factor'])
+        
+        avg_rent_reduction = np.mean(rent_reductions) if rent_reductions else 0
+        
         return {
             'total_units': total_units,
             'occupied_units': occupied_units,
             'vacancy_rate': (total_units - occupied_units) / total_units,
             'average_rent': avg_rent,
             'average_quality': avg_quality,
-            'total_profit': self.total_profit
+            'total_profit': self.total_profit,
+            'average_vacancy_duration': avg_vacancy_duration,
+            'average_rent_reduction': avg_rent_reduction,
+            'vacant_units_count': len(vacant_units)
         }

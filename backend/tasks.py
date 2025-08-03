@@ -254,6 +254,9 @@ def run_simulation(task_id: str, params: Dict):
                 redis_client.publish(channel, json.dumps({"type": "paused"}))
                 break
 
+            # Add a delay between steps
+            time.sleep(1)  # 1 second delay between steps
+
             # If paused, wait for resume signal
             while is_paused:
                 time.sleep(0.1)  # Check for signals every 100ms

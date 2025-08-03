@@ -18,7 +18,7 @@ import PauseIcon from '@mui/icons-material/Pause';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useSimulation } from '../contexts/SimulationContext';
 import HousingGrid from '../components/HousingGrid';
-import EventLog from '../components/EventLog';
+import EventLog from '../components/SimulationEventLog';
 
 // Theme colors
 const colors = {
@@ -225,9 +225,9 @@ const SimulationPage = () => {
                 disabled={isRunning}
                 label="Policy Type"
               >
-                <MenuItem value="none">No Policy</MenuItem>
-                <MenuItem value="rent_cap">Rent Cap</MenuItem>
-                <MenuItem value="lvt">Land Value Tax (No Property Tax)</MenuItem>
+                <MenuItem value="none">No Policy (Free market with standard property tax)</MenuItem>
+                <MenuItem value="rent_cap">Rent Cap (Maximum annual rent increase of 10%)</MenuItem>
+                <MenuItem value="lvt">Land Value Tax (Replaces property tax, encourages development)</MenuItem>
               </Select>
             </FormControl>
 

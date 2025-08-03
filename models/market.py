@@ -49,19 +49,12 @@ class RentalMarket:
             'location_premiums': self._calculate_location_premiums()
         })
 
-        # Adjust rents for vacant units
+        # Update vacancy duration for all units (rent adjustments now handled by landlords)
         for unit in self.units:
             if not unit.occupied and not getattr(unit, 'is_owner_occupied', False):
-                vacancy_duration = getattr(unit, 'vacancy_duration', 0)
-                # More aggressive price drops based on vacancy duration
-                if vacancy_duration > 0:
-                    # Drop rent by 5-15% per period based on duration
-                    reduction = min(0.15, 0.05 * (vacancy_duration / 2))  # Cap at 15% reduction
-                    unit.rent = unit.rent * (1 - reduction)
-                    # Reset rent if it gets too low
-                    if unit.rent < unit.base_rent * 0.6:
-                        unit.rent = unit.base_rent * 0.6
-                unit.vacancy_duration += 1
+                # Vacancy duration is now managed by the landlord's rent reduction strategy
+                # The market just tracks it for statistics
+                pass
             else:
                 unit.vacancy_duration = 0
 
