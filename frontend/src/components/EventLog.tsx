@@ -130,27 +130,27 @@ const EventLog: React.FC<EventLogProps> = ({
     if ('type' in event && event.type) {
       switch (event.type) {
         case 'household_split':
-          return `Household "${event.household_name}" split into two households (Original size: ${event.original_size}, Remaining size: ${event.remaining_size})`;
+          return `Part of the ${event.household_name} family moved out to start their own household (${event.remaining_size} members stayed)`;
         case 'household_merge':
-          return `Household "${event.household_name}" merged with another household (Combined size: ${event.combined_size})`;
+          return `The ${event.household_name} family welcomed new members as households merged into a ${event.combined_size}-person family`;
         case 'rent_adjustment':
-          return `Monthly rent was adjusted - New rent burden: ${event.rent_burden?.toFixed(1)}% of household income`;
+          return `Monthly rent was adjusted to ${event.rent_burden?.toFixed(1)}% of the household's income`;
         case 'renovation':
-          return 'Property underwent renovations to improve quality';
+          return 'The property underwent renovations to improve living conditions';
         case 'HOUSING_SEARCH':
-          return `Household "${event.household_name}" searched for housing - ${event.reason}`;
+          return `The ${event.household_name} family considered moving here - ${event.reason.toLowerCase()}`;
         default:
-          return `${event.type} event for household "${event.household_name}"`;
+          return `${event.type} event for the ${event.household_name} family`;
       }
     }
     // Handle moves
     if (event.to_unit_id === unitId) {
-      return `Household "${event.household_name}" moved into this property`;
+      return `The ${event.household_name} family moved in as new residents`;
     }
     if (event.from_unit_id === unitId) {
-      return `Household "${event.household_name}" moved out of this property`;
+      return `The ${event.household_name} family found a new home elsewhere`;
     }
-    return `Household "${event.household_name}" relocated to a different property`;
+    return `The ${event.household_name} family moved to another property`;
   };
 
   return (

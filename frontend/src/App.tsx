@@ -15,6 +15,7 @@ import LandlordPage from './pages/LandlordPage';
 import AboutPage from './pages/AboutPage';
 import PropertyDetailPage from './pages/PropertyDetailPage';
 import ScenarioPage from './pages/ScenarioPage';
+import PolicyComparisonPage from './pages/PolicyComparisonPage';
 import { SimulationProvider } from './contexts/SimulationContext';
 
 // Theme colors
@@ -89,6 +90,22 @@ function App() {
             </Link>
             <Link
               component={RouterLink}
+              to="/compare"
+              sx={{
+                color: colors.textDark,
+                textDecoration: 'none',
+                borderBottom: isActive('/compare') ? `2px solid ${colors.textDark}` : 'none',
+                pb: 0.5,
+                fontWeight: 500,
+                '&:hover': {
+                  borderBottom: `2px solid ${colors.textDark}`,
+                },
+              }}
+            >
+              Compare Policies
+            </Link>
+            <Link
+              component={RouterLink}
               to="/about"
               sx={{
                 color: colors.textDark,
@@ -113,6 +130,7 @@ function App() {
           <Route path="/property/:id" element={<PropertyDetailPage />} />
           <Route path="/landlord" element={<LandlordPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/compare" element={<PolicyComparisonPage />} />
           <Route path="/" element={<Navigate to="/simulation" replace />} />
         </Routes>
       </Container>

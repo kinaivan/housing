@@ -256,7 +256,7 @@ const UnhousedHouseholdCard: React.FC<UnhousedHousehold> = ({ name, size, income
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <AttachMoneyIcon sx={{ fontSize: 16 }} />
-        <Typography variant="body2">{Math.round(income).toLocaleString()}/yr</Typography>
+                  <Typography variant="body2">{Math.round(income/12).toLocaleString()}/month</Typography>
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <AccountBalanceWalletIcon sx={{ fontSize: 16 }} />

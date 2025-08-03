@@ -157,19 +157,13 @@ const PropertyDetailPage = () => {
 
         const rentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
         
-        // Ensure satisfaction is a valid number
-        let satisfaction = 0;
-        if (unit.household?.satisfaction !== undefined && unit.household?.satisfaction !== null) {
-          satisfaction = Math.max(0, Math.min(1, unit.household.satisfaction)) * 100;
-        }
-        
         const newEntry: UnitHistoryEntry = {
           period: frame.period,
           occupants: unit.occupants,
           rent: unit.rent,
           occupancyRate: unit.is_occupied ? 100 : 0,
           quality: (unit.quality || 0) * 100,
-          satisfaction: satisfaction,
+          satisfaction: unit.household?.satisfaction ? unit.household.satisfaction * 100 : 0,
           rentBurden: rentBurden,
           income: unit.household?.income || 0,
         };
@@ -244,7 +238,7 @@ const PropertyDetailPage = () => {
   const currentRentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
   const isAffordable = currentRentBurden <= 30;
   const qualityScore = (unit.quality || 0) * 100;
-  const satisfactionScore = unit.household?.satisfaction !== undefined ? unit.household.satisfaction * 100 : 0;
+  const satisfactionScore = unit.household?.satisfaction ? unit.household.satisfaction * 100 : 0;
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>

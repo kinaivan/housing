@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -141,6 +141,11 @@ const RiskIndicator: React.FC<{ score: number; label: string }> = ({ score, labe
 function LandlordPage() {
   const [calculatorType, setCalculatorType] = useState<'scenario' | 'custom'>('scenario');
   const { inputs, results, updateInput, calculate } = useLandlordCalculator();
+
+  // Calculate initial results when component mounts
+  useEffect(() => {
+    calculate();
+  }, [calculate]);
 
   const handleCalculatorTypeChange = (
     event: React.MouseEvent<HTMLElement>,
