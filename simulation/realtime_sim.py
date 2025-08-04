@@ -6,13 +6,14 @@ from models.policy import RentCapPolicy
 import copy
 
 class RealtimeSimulation:
-    def __init__(self, households, landlords, rental_market, policy, years=1):
+    def __init__(self, households, landlords, rental_market, policy, years, migration_rate=0.1):
         # Create initial simulation
         self.initial_households = households
         self.initial_landlords = landlords
         self.initial_rental_market = rental_market
         self.initial_policy = policy
         self.years = years
+        self.migration_rate = migration_rate  # Store migration rate for resets
         
         # Initialize simulation with shallow copies
         self.simulation = Simulation(
@@ -20,7 +21,8 @@ class RealtimeSimulation:
             list(landlords),   # shallow copy
             rental_market,     # no need to copy
             policy,           # no need to copy
-            years
+            years,
+            migration_rate    # Pass migration rate to Simulation
         )
         self.current_year = 1
         self.current_period = 1
@@ -107,7 +109,8 @@ class RealtimeSimulation:
             list(self.initial_landlords),   # shallow copy
             self.initial_rental_market,     # reuse original
             self.initial_policy,            # reuse original
-            self.years
+            self.years,
+            self.migration_rate # Use the stored migration rate
         )
         
         # Pre-compute initial state

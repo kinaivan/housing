@@ -5,12 +5,22 @@ interface Unit {
   occupants: number;
   rent: number;
   is_occupied: boolean;
+  is_owner_occupied: boolean;
   quality?: number;
   lastRenovation?: number;
   household?: {
-    income: number;
-    satisfaction: number;
+    id: number;
+    name: string;
+    age: number;
     size: number;
+    income: number;
+    wealth: number;
+    satisfaction: number;
+    life_stage: string;
+    monthly_payment?: number;
+    mortgage_balance?: number;
+    mortgage_interest_rate?: number;
+    mortgage_term?: number;
   };
 }
 

@@ -44,6 +44,7 @@ const Grid = MuiGrid as React.ComponentType<{
   spacing?: number;
   sx?: any;
   children?: React.ReactNode;
+  component?: React.ElementType;
 }>;
 
 // Theme colors
@@ -53,8 +54,9 @@ const colors = {
   yellowDark: '#FFC000',
   textDark: '#2C2C2C',
   white: '#FFFFFF',
-  occupied: '#28a745',
-  vacant: '#dc3545',
+  occupied: '#28a745',  // Rented units (green)
+  ownerOccupied: '#2196f3',  // Owner-occupied units (blue)
+  vacant: '#808080',  // Empty units (grey)
   warning: '#ff9800',
   info: '#2196f3',
   success: '#4caf50',
@@ -65,12 +67,23 @@ interface Unit {
   occupants: number;
   rent: number;
   is_occupied: boolean;
+  is_owner_occupied: boolean;
   quality?: number;
   lastRenovation?: number;
   household?: {
-    income: number;
-    satisfaction: number;
+    id: number;
+    name: string;
+    age: number;
     size: number;
+    income: number;
+    wealth: number;
+    satisfaction: number;
+    life_stage: string;
+    months_in_current_unit?: number;
+    monthly_payment?: number;
+    mortgage_balance?: number;
+    mortgage_interest_rate?: number;
+    mortgage_term?: number;
   };
 }
 
@@ -155,7 +168,7 @@ const PropertyDetailPage = () => {
           quality: unit.quality
         });
 
-        const rentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
+        const rentBurden = unit.household ? ((unit.rent) / unit.household.income * 100) : 0;
         
         const newEntry: UnitHistoryEntry = {
           period: frame.period,
@@ -235,10 +248,29 @@ const PropertyDetailPage = () => {
     );
   }
 
-  const currentRentBurden = unit.household ? ((unit.rent * 12) / unit.household.income * 100) : 0;
+  const currentRentBurden = unit.household ? ((unit.rent) / unit.household.income * 100) : 0;
   const isAffordable = currentRentBurden <= 30;
   const qualityScore = (unit.quality || 0) * 100;
   const satisfactionScore = unit.household?.satisfaction ? unit.household.satisfaction * 100 : 0;
+
+  const getOccupancyColor = (unit: Unit) => {
+    if (unit.is_owner_occupied) return colors.ownerOccupied;
+    if (unit.is_occupied) return colors.occupied;
+    return colors.vacant;
+  };
+
+  const getOccupancyStatus = (unit: Unit) => {
+    if (unit.is_owner_occupied) return 'Owner Occupied';
+    if (unit.is_occupied) return 'Rented';
+    return 'Vacant';
+  };
+
+  const formatLifeStage = (stage: string) => {
+    return stage
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -289,16 +321,16 @@ const PropertyDetailPage = () => {
 
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-        <HomeIcon sx={{ fontSize: 40, color: unit.is_occupied ? colors.occupied : colors.vacant }} />
+        <HomeIcon sx={{ fontSize: 40, color: getOccupancyColor(unit) }} />
         <Box>
           <Typography variant="h3" sx={{ fontWeight: 'bold', color: colors.textDark }}>
             Property #{unit.id}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1 }}>
             <Chip 
-              label={unit.is_occupied ? 'Occupied' : 'Vacant'}
+              label={getOccupancyStatus(unit)}
               sx={{ 
-                backgroundColor: unit.is_occupied ? colors.occupied : colors.vacant,
+                backgroundColor: getOccupancyColor(unit),
                 color: 'white',
                 fontWeight: 600,
               }}
@@ -312,9 +344,175 @@ const PropertyDetailPage = () => {
         </Box>
       </Box>
 
+      {/* Current Tenant Information */}
+      {unit.is_occupied && unit.household && (
+        <Paper 
+          elevation={3} 
+          sx={{ 
+            p: 3, 
+            mb: 4, 
+            border: '2px solid',
+            borderColor: unit.is_owner_occupied ? colors.ownerOccupied : colors.occupied,
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Background decoration */}
+          <Box
+            sx={{
+              position: 'absolute',
+              right: -50,
+              top: -50,
+              width: 200,
+              height: 200,
+              borderRadius: '50%',
+              background: unit.is_owner_occupied 
+                ? `linear-gradient(45deg, ${colors.ownerOccupied}22, ${colors.ownerOccupied}11)`
+                : `linear-gradient(45deg, ${colors.occupied}22, ${colors.occupied}11)`,
+              zIndex: 0,
+            }}
+          />
+
+          {/* Content */}
+          <Box sx={{ position: 'relative', zIndex: 1 }}>
+            <Typography variant="h4" sx={{ mb: 3, color: colors.textDark, display: 'flex', alignItems: 'center', gap: 2 }}>
+              <PersonIcon sx={{ fontSize: 32, color: unit.is_owner_occupied ? colors.ownerOccupied : colors.occupied }} />
+              {unit.is_owner_occupied ? 'Property Owner' : 'Current Tenant'}
+            </Typography>
+
+            <Grid container spacing={4}>
+              {/* Basic Information */}
+              <Grid item xs={12} md={4} component="div">
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
+                    Household Information
+                  </Typography>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Name</Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 500 }}>
+                        {unit.household.name}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Age & Life Stage</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {unit.household.age} years old
+                      </Typography>
+                      <Typography variant="body1" color="textSecondary">
+                        {formatLifeStage(unit.household.life_stage)}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Household Size</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {unit.household.size} {unit.household.size === 1 ? 'person' : 'people'}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              </Grid>
+
+              {/* Financial Information */}
+              <Grid item xs={12} md={4} component="div">
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
+                    Financial Status
+                  </Typography>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Monthly Income</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 500, color: colors.success }}>
+                        ${unit.household.income.toLocaleString()}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Wealth</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 500, color: colors.info }}>
+                        ${unit.household.wealth.toLocaleString()}
+                      </Typography>
+                    </Box>
+                    {unit.is_owner_occupied && unit.household.mortgage_balance && (
+                      <Box>
+                        <Typography variant="subtitle2" color="textSecondary">Mortgage Details</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                          Balance: ${unit.household.mortgage_balance.toLocaleString()}
+                        </Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                          Rate: {((unit.household.mortgage_interest_rate || 0) * 100).toFixed(2)}%
+                        </Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                          Term: {unit.household.mortgage_term} years
+                        </Typography>
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+              </Grid>
+
+              {/* Housing Costs & Satisfaction */}
+              <Grid item xs={12} md={4} component="div">
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ mb: 2, color: colors.textDark }}>
+                    Housing Status
+                  </Typography>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">
+                        {unit.is_owner_occupied ? 'Monthly Payment' : 'Monthly Rent'}
+                      </Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 500 }}>
+                        ${unit.rent.toLocaleString()}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {currentRentBurden.toFixed(1)}% of monthly income
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Time in Property</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {unit.household.months_in_current_unit ? (
+                          `${Math.floor(unit.household.months_in_current_unit / 12)} years, ${unit.household.months_in_current_unit % 12} months`
+                        ) : (
+                          'Recently moved in'
+                        )}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" color="textSecondary">Satisfaction Level</Typography>
+                      <Box sx={{ 
+                        p: 1.5, 
+                        mt: 1,
+                        borderRadius: 1, 
+                        backgroundColor: satisfactionScore >= 70 ? '#e8f5e8' : 
+                                      satisfactionScore >= 40 ? '#fff3e0' : '#ffebee',
+                        border: `1px solid ${satisfactionScore >= 70 ? '#c8e6c9' : 
+                                          satisfactionScore >= 40 ? '#ffe0b2' : '#ffcdd2'}`,
+                      }}>
+                        <Typography variant="h6" sx={{ 
+                          fontWeight: 500,
+                          color: satisfactionScore >= 70 ? '#2e7d32' : 
+                                satisfactionScore >= 40 ? '#ef6c00' : '#c62828',
+                        }}>
+                          {satisfactionScore.toFixed(0)}%
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                            {satisfactionScore >= 70 ? '😊 Very Happy' : 
+                             satisfactionScore >= 40 ? '😐 Moderately Satisfied' : '😟 Unsatisfied'}
+                          </Typography>
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
+          </Box>
+        </Paper>
+      )}
+
       {/* Key Metrics Grid */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
+      <Grid container spacing={3} sx={{ mb: 4 }} component="div">
+        <Grid item xs={12} sm={6} md={3} component="div">
           <MetricCard
             title="Monthly Rent"
             value={`$${unit.rent.toLocaleString()}`}
@@ -324,7 +522,7 @@ const PropertyDetailPage = () => {
             color={colors.info}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={3} component="div">
           <MetricCard
             title="Occupants"
             value={unit.occupants}
@@ -333,7 +531,7 @@ const PropertyDetailPage = () => {
             color={colors.occupied}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={3} component="div">
           <MetricCard
             title="Quality Score"
             value={`${qualityScore.toFixed(0)}%`}
@@ -342,7 +540,7 @@ const PropertyDetailPage = () => {
             color={colors.warning}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={3} component="div">
           <MetricCard
             title="Satisfaction"
             value={unit.is_occupied ? `${satisfactionScore.toFixed(0)}%` : 'N/A'}
@@ -357,15 +555,31 @@ const PropertyDetailPage = () => {
       {unit.is_occupied && unit.household && (
         <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
           <Typography variant="h5" sx={{ mb: 3, fontWeight: 600, color: colors.textDark }}>
-            Current Residents
+            {unit.is_owner_occupied ? 'Property Owner' : 'Current Residents'}
           </Typography>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
+          <Grid container spacing={3} component="div">
+            {/* Basic Information */}
+            <Grid item xs={12} md={4} component="div">
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  Household Information
+                </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <AccountBalanceWalletIcon sx={{ color: colors.info }} />
+                  <PersonIcon sx={{ color: colors.textDark }} />
                   <Typography variant="body1">
-                    <strong>Annual Income:</strong> ${unit.household.income.toLocaleString()}
+                    <strong>Name:</strong> {unit.household.name}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PersonIcon sx={{ color: colors.textDark }} />
+                  <Typography variant="body1">
+                    <strong>Age:</strong> {unit.household.age} years
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PersonIcon sx={{ color: colors.textDark }} />
+                  <Typography variant="body1">
+                    <strong>Life Stage:</strong> {formatLifeStage(unit.household.life_stage)}
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -376,49 +590,124 @@ const PropertyDetailPage = () => {
                 </Box>
               </Box>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <Box>
-                <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
-                  Rent Burden Analysis
+
+            {/* Financial Information */}
+            <Grid item xs={12} md={4} component="div">
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  Financial Status
                 </Typography>
-                <Box 
-                  sx={{ 
-                    p: 2, 
-                    borderRadius: 2, 
-                    backgroundColor: isAffordable ? '#e8f5e8' : '#ffebee',
-                    border: `2px solid ${isAffordable ? colors.success : colors.vacant}`,
-                  }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    {isAffordable ? 
-                      <CheckCircleIcon sx={{ color: colors.success }} /> : 
-                      <WarningIcon sx={{ color: colors.vacant }} />
-                    }
-                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                      {currentRentBurden.toFixed(1)}% of income
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AccountBalanceWalletIcon sx={{ color: colors.info }} />
+                  <Typography variant="body1">
+                    <strong>Monthly Income:</strong> ${unit.household.income.toLocaleString()}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AccountBalanceWalletIcon sx={{ color: colors.info }} />
+                  <Typography variant="body1">
+                    <strong>Wealth:</strong> ${unit.household.wealth.toLocaleString()}
+                  </Typography>
+                </Box>
+                {unit.is_owner_occupied && unit.household.monthly_payment && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AccountBalanceWalletIcon sx={{ color: colors.info }} />
+                    <Typography variant="body1">
+                      <strong>Monthly Payment:</strong> ${unit.household.monthly_payment.toLocaleString()}
                     </Typography>
                   </Box>
-                  <Typography variant="body2">
-                    {isAffordable ? 
-                      'Within recommended 30% threshold' : 
-                      'Above recommended 30% threshold'
-                    }
-                  </Typography>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={Math.min(currentRentBurden, 100)} 
+                )}
+              </Box>
+            </Grid>
+
+            {/* Housing Cost Analysis */}
+            <Grid item xs={12} md={4} component="div">
+              <Box>
+                <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
+                  {unit.is_owner_occupied ? 'Mortgage Analysis' : 'Rent Burden Analysis'}
+                </Typography>
+                {unit.is_owner_occupied && unit.household?.mortgage_balance ? (
+                  <Box 
                     sx={{ 
-                      mt: 1, 
-                      height: 8, 
-                      borderRadius: 4,
-                      backgroundColor: '#e0e0e0',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: isAffordable ? colors.success : colors.vacant,
-                        borderRadius: 4,
+                      p: 2, 
+                      borderRadius: 2, 
+                      backgroundColor: colors.yellowLight,
+                      border: `2px solid ${colors.info}`,
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="body1">
+                        <strong>Mortgage Balance:</strong> ${unit.household.mortgage_balance.toLocaleString()}
+                      </Typography>
+                      <Typography variant="body1">
+                        <strong>Interest Rate:</strong> {(unit.household.mortgage_interest_rate || 0) * 100}%
+                      </Typography>
+                      <Typography variant="body1">
+                        <strong>Term:</strong> {unit.household.mortgage_term} years
+                      </Typography>
+                      <Typography variant="body1">
+                        <strong>Monthly Payment:</strong> ${unit.household.monthly_payment?.toLocaleString()}
+                      </Typography>
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          Mortgage Progress
+                        </Typography>
+                        <LinearProgress 
+                          variant="determinate" 
+                          value={100 - (unit.household.mortgage_balance / (unit.household.monthly_payment || 1) / (unit.household.mortgage_term || 30) / 12 * 100)} 
+                          sx={{ 
+                            height: 8, 
+                            borderRadius: 4,
+                            backgroundColor: '#e0e0e0',
+                            '& .MuiLinearProgress-bar': {
+                              backgroundColor: colors.info,
+                              borderRadius: 4,
+                            }
+                          }} 
+                        />
+                      </Box>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box 
+                    sx={{ 
+                      p: 2, 
+                      borderRadius: 2, 
+                      backgroundColor: isAffordable ? '#e8f5e8' : '#ffebee',
+                      border: `2px solid ${isAffordable ? colors.success : colors.vacant}`,
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      {isAffordable ? 
+                        <CheckCircleIcon sx={{ color: colors.success }} /> : 
+                        <WarningIcon sx={{ color: colors.vacant }} />
                       }
-                    }} 
-                  />
-                </Box>
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        {currentRentBurden.toFixed(1)}% of income
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2">
+                      {isAffordable ? 
+                        'Within recommended 30% threshold' : 
+                        'Above recommended 30% threshold'
+                      }
+                    </Typography>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={Math.min(currentRentBurden, 100)} 
+                      sx={{ 
+                        mt: 1, 
+                        height: 8, 
+                        borderRadius: 4,
+                        backgroundColor: '#e0e0e0',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: isAffordable ? colors.success : colors.vacant,
+                          borderRadius: 4,
+                        }
+                      }} 
+                    />
+                  </Box>
+                )}
               </Box>
             </Grid>
           </Grid>
@@ -431,8 +720,8 @@ const PropertyDetailPage = () => {
           <Typography variant="h5" sx={{ mb: 3, fontWeight: 600, color: colors.textDark }}>
             Performance Analytics
           </Typography>
-          <Grid container spacing={3}>
-            <Grid item xs={12} sm={6} md={3}>
+          <Grid container spacing={3} component="div">
+            <Grid item xs={12} sm={6} md={6} component="div">
               <Box sx={{ textAlign: 'center' }}>
                 <Typography variant="h4" sx={{ fontWeight: 'bold', color: colors.info }}>
                   {analytics.avgOccupancy.toFixed(1)}%
@@ -440,34 +729,14 @@ const PropertyDetailPage = () => {
                 <Typography variant="body2" color="text.secondary">Average Occupancy</Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={6} component="div">
               <Box sx={{ textAlign: 'center' }}>
                 <Typography variant="h4" sx={{ fontWeight: 'bold', color: colors.success }}>
                   ${analytics.totalRevenue.toLocaleString()}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">Total Revenue</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography 
-                  variant="h4" 
-                  sx={{ 
-                    fontWeight: 'bold', 
-                    color: analytics.rentGrowth >= 0 ? colors.success : colors.vacant 
-                  }}
-                >
-                  {analytics.rentGrowth >= 0 ? '+' : ''}{analytics.rentGrowth.toFixed(1)}%
+                <Typography variant="body2" color="text.secondary">
+                  {unit.is_owner_occupied ? 'Property Value' : 'Total Revenue'}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">Rent Growth</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h4" sx={{ fontWeight: 'bold', color: colors.warning }}>
-                  {analytics.vacancyRate.toFixed(1)}%
-                </Typography>
-                <Typography variant="body2" color="text.secondary">Vacancy Rate</Typography>
               </Box>
             </Grid>
           </Grid>

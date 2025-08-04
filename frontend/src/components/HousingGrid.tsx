@@ -11,28 +11,40 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate } from 'react-router-dom';
 import { useSimulation } from '../contexts/SimulationContext';
 
-// Theme colors
+// Update colors to include owner-occupied
 const colors = {
   yellowPrimary: '#FFD700',
   yellowLight: '#FFF4B8',
   yellowDark: '#FFC000',
   textDark: '#2C2C2C',
   white: '#FFFFFF',
-  occupied: '#28a745',
-  vacant: '#dc3545',
+  occupied: '#28a745',  // Rented units (green)
+  ownerOccupied: '#2196f3',  // Owner-occupied units (blue)
+  vacant: '#808080',  // Empty units (grey)
 };
 
+// Update interfaces to include owner-occupied status and more household info
 interface HouseProps {
   occupants: number;
   id: number;
   rent: number;
   is_occupied: boolean;
+  is_owner_occupied: boolean;
   quality?: number;
   lastRenovation?: number;
   household?: {
-    income: number;
-    satisfaction: number;
+    id: number;
+    name: string;
+    age: number;
     size: number;
+    income: number;
+    wealth: number;
+    satisfaction: number;
+    life_stage: string;
+    monthly_payment?: number;
+    mortgage_balance?: number;
+    mortgage_interest_rate?: number;
+    mortgage_term?: number;
   };
 }
 
@@ -96,17 +108,40 @@ interface Frame {
   }>;
 }
 
-// Custom Tooltip Content Component
+// Helper function to format life stage
+const formatLifeStage = (stage: string) => {
+  return stage
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
+// Helper function to get occupancy color
+const getOccupancyColor = (unit: { is_occupied: boolean, is_owner_occupied: boolean }) => {
+  if (unit.is_owner_occupied) return colors.ownerOccupied;
+  if (unit.is_occupied) return colors.occupied;
+  return colors.vacant;
+};
+
+// Helper function to get occupancy status text
+const getOccupancyStatus = (unit: { is_occupied: boolean, is_owner_occupied: boolean }) => {
+  if (unit.is_owner_occupied) return 'Owner Occupied';
+  if (unit.is_occupied) return 'Rented';
+  return 'Vacant';
+};
+
+// Update HouseTooltipContent to show more information
 const HouseTooltipContent: React.FC<HouseProps> = ({
   id,
   is_occupied,
+  is_owner_occupied,
   quality = 0,
   lastRenovation = 0,
   rent,
   occupants,
   household
 }) => {
-  const rentBurden = household ? ((rent * 12) / household.income * 100) : 0;
+  const rentBurden = household ? ((rent) / household.income * 100) : 0;
   
   return (
     <Paper 
@@ -122,21 +157,20 @@ const HouseTooltipContent: React.FC<HouseProps> = ({
     >
       {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <HomeIcon sx={{ color: is_occupied ? colors.occupied : colors.vacant, fontSize: 24 }} />
+        <HomeIcon sx={{ color: getOccupancyColor({ is_occupied, is_owner_occupied }), fontSize: 24 }} />
         <Typography variant="h6" sx={{ fontWeight: 600, color: colors.textDark }}>
           Unit #{id}
         </Typography>
-        {/* Chip component was removed, so this will cause a linter error */}
-        {/* <Chip 
-          label={is_occupied ? 'Occupied' : 'Vacant'}
-          size="small"
+        <Typography 
+          variant="caption" 
           sx={{ 
             ml: 'auto',
-            backgroundColor: is_occupied ? colors.occupied : colors.vacant,
-            color: 'white',
-            fontWeight: 500,
+            color: getOccupancyColor({ is_occupied, is_owner_occupied }),
+            fontWeight: 600,
           }}
-        /> */}
+        >
+          {getOccupancyStatus({ is_occupied, is_owner_occupied })}
+        </Typography>
       </Box>
 
       {/* Property Details */}
@@ -156,79 +190,111 @@ const HouseTooltipContent: React.FC<HouseProps> = ({
           </Typography>
         </Box>
 
-        {/* Rent */}
+        {/* Monthly Cost */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <AttachMoneyIcon sx={{ fontSize: 18, color: '#42a5f5' }} />
           <Typography variant="body2" sx={{ color: colors.textDark }}>
-            <strong>Rent:</strong> ${rent.toLocaleString()}/month
+            <strong>{is_owner_occupied ? 'Monthly Payment' : 'Rent'}:</strong> ${rent.toLocaleString()}/month
           </Typography>
         </Box>
 
-        {/* Divider component was removed, so this will cause a linter error */}
-        {/* <Divider sx={{ my: 1 }} /> */}
-
         {/* Occupancy Information */}
-        {is_occupied ? (
+        {is_occupied && household && (
           <Stack spacing={1}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: colors.textDark }}>
-              Current Residents
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: colors.textDark, mt: 1 }}>
+              {is_owner_occupied ? 'Owner Information' : 'Current Residents'}
             </Typography>
             
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <PersonIcon sx={{ fontSize: 18, color: colors.textDark }} />
               <Typography variant="body2" sx={{ color: colors.textDark }}>
-                <strong>People:</strong> {occupants}
+                <strong>Name:</strong> {household.name}
               </Typography>
             </Box>
 
-            {household && (
-              <>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SentimentSatisfiedIcon sx={{ fontSize: 18, color: '#4caf50' }} />
-                  <Typography variant="body2" sx={{ color: colors.textDark }}>
-                    <strong>Satisfaction:</strong> {((household.satisfaction ?? 0) * 100).toFixed(0)}%
-                  </Typography>
-                </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <PersonIcon sx={{ fontSize: 18, color: colors.textDark }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Age:</strong> {household.age} years
+              </Typography>
+            </Box>
 
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <PersonIcon sx={{ fontSize: 18, color: colors.textDark }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Life Stage:</strong> {formatLifeStage(household.life_stage)}
+              </Typography>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <PersonIcon sx={{ fontSize: 18, color: colors.textDark }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Household Size:</strong> {household.size} people
+              </Typography>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccountBalanceWalletIcon sx={{ fontSize: 18, color: '#9c27b0' }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Monthly Income:</strong> ${household.income.toLocaleString()}
+              </Typography>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccountBalanceWalletIcon sx={{ fontSize: 18, color: '#9c27b0' }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Wealth:</strong> ${household.wealth.toLocaleString()}
+              </Typography>
+            </Box>
+
+            {is_owner_occupied && household.mortgage_balance && (
+              <>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <AccountBalanceWalletIcon sx={{ fontSize: 18, color: '#9c27b0' }} />
                   <Typography variant="body2" sx={{ color: colors.textDark }}>
-                    <strong>Income:</strong> ${household.income?.toLocaleString() ?? 0}/year
+                    <strong>Mortgage Balance:</strong> ${household.mortgage_balance.toLocaleString()}
                   </Typography>
                 </Box>
-
-                <Box 
-                  sx={{ 
-                    p: 1.5, 
-                    borderRadius: 1, 
-                    backgroundColor: rentBurden > 30 ? '#ffebee' : '#e8f5e8',
-                    border: `1px solid ${rentBurden > 30 ? '#ffcdd2' : '#c8e6c9'}`,
-                  }}
-                >
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 500,
-                      color: rentBurden > 30 ? '#c62828' : '#2e7d32',
-                    }}
-                  >
-                    <strong>Rent Burden:</strong> {rentBurden.toFixed(1)}% of income
-                    {rentBurden > 30 && (
-                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                        ⚠️ Above recommended 30%
-                      </Typography>
-                    )}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AccountBalanceWalletIcon sx={{ fontSize: 18, color: '#9c27b0' }} />
+                  <Typography variant="body2" sx={{ color: colors.textDark }}>
+                    <strong>Interest Rate:</strong> {(household.mortgage_interest_rate || 0) * 100}%
                   </Typography>
                 </Box>
               </>
             )}
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <SentimentSatisfiedIcon sx={{ fontSize: 18, color: '#4caf50' }} />
+              <Typography variant="body2" sx={{ color: colors.textDark }}>
+                <strong>Satisfaction:</strong> {(household.satisfaction * 100).toFixed(0)}%
+              </Typography>
+            </Box>
+
+            <Box 
+              sx={{ 
+                p: 1.5, 
+                borderRadius: 1, 
+                backgroundColor: rentBurden > 30 ? '#ffebee' : '#e8f5e8',
+                border: `1px solid ${rentBurden > 30 ? '#ffcdd2' : '#c8e6c9'}`,
+              }}
+            >
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  fontWeight: 500,
+                  color: rentBurden > 30 ? '#c62828' : '#2e7d32',
+                }}
+              >
+                <strong>{is_owner_occupied ? 'Housing Cost Burden' : 'Rent Burden'}:</strong> {rentBurden.toFixed(1)}% of income
+                {rentBurden > 30 && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                    ⚠️ Above recommended 30%
+                  </Typography>
+                )}
+              </Typography>
+            </Box>
           </Stack>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 2 }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
-              No current residents
-            </Typography>
-          </Box>
         )}
       </Stack>
     </Paper>
@@ -270,7 +336,8 @@ const House: React.FC<HouseProps> = ({
   occupants, 
   id, 
   rent, 
-  is_occupied, 
+  is_occupied,
+  is_owner_occupied,
   quality = 0, 
   lastRenovation = 0,
   household 
@@ -291,17 +358,14 @@ const House: React.FC<HouseProps> = ({
   ));
 
   const handleClick = async () => {
-    // Auto-pause simulation if it's currently running
     if (isRunning && !isPaused) {
       try {
         await pauseSimulation();
         console.log('Simulation auto-paused for property detail view');
       } catch (error) {
         console.error('Failed to auto-pause simulation:', error);
-        // Continue navigation even if pause fails
       }
     }
-    
     navigate(`/property/${id}`);
   };
 
@@ -314,6 +378,7 @@ const House: React.FC<HouseProps> = ({
             occupants={occupants}
             rent={rent}
             is_occupied={is_occupied}
+            is_owner_occupied={is_owner_occupied}
             quality={quality}
             lastRenovation={lastRenovation}
             household={household}
@@ -350,11 +415,11 @@ const House: React.FC<HouseProps> = ({
         sx={{
           p: 2,
           width: '100%',
-          height: '160px', // Fixed height for uniform boxes (increased for vertical people)
+          height: '160px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'space-between', // Distribute content evenly
+          justifyContent: 'space-between',
           backgroundColor: colors.white,
           transition: 'all 0.3s ease',
           cursor: 'pointer',
@@ -362,7 +427,6 @@ const House: React.FC<HouseProps> = ({
             transform: 'scale(1.05)',
             boxShadow: 6,
           },
-          // Add quality indicator through border color
           border: '2px solid',
           borderColor: quality >= 0.8 ? '#4caf50' : 
                       quality >= 0.6 ? '#8bc34a' :
@@ -373,7 +437,7 @@ const House: React.FC<HouseProps> = ({
         <HomeIcon 
           sx={{ 
             fontSize: '40px',
-            color: is_occupied ? colors.occupied : colors.vacant,
+            color: getOccupancyColor({ is_occupied, is_owner_occupied }),
           }}
         />
         
@@ -381,17 +445,21 @@ const House: React.FC<HouseProps> = ({
         <Box 
           sx={{ 
             display: 'flex',
-            flexDirection: 'column', // Stack people vertically
+            flexDirection: 'column',
             justifyContent: 'center',
             alignItems: 'center',
             gap: 0.2,
-            height: '60px', // Increased height for vertical stacking
+            height: '60px',
             width: '100%',
-            overflow: 'hidden', // Hide overflow if too many occupants
+            overflow: 'hidden',
           }}
         >
+          {household && (
+            <Typography variant="caption" sx={{ color: colors.textDark, fontWeight: 'bold', mb: 0.5 }}>
+              {household.name}
+            </Typography>
+          )}
           {occupants > 6 ? (
-            // Show count if too many occupants to display icons vertically
             <Typography variant="body2" color={colors.textDark} sx={{ fontWeight: 'bold' }}>
               {occupants} people
             </Typography>
@@ -400,7 +468,7 @@ const House: React.FC<HouseProps> = ({
           )}
         </Box>
 
-        {/* Rent display */}
+        {/* Monthly cost display */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <AttachMoneyIcon sx={{ fontSize: '16px', color: colors.textDark }} />
           <Typography variant="body2" color={colors.textDark}>
@@ -412,18 +480,29 @@ const House: React.FC<HouseProps> = ({
   );
 };
 
+// Update HousingGridProps interface to match HouseProps
 interface HousingGridProps {
   units: Array<{
     id: number;
     occupants: number;
     rent: number;
     is_occupied: boolean;
+    is_owner_occupied: boolean;
     quality?: number;
     lastRenovation?: number;
     household?: {
-      income: number;
-      satisfaction: number;
+      id: number;
+      name: string;
+      age: number;
       size: number;
+      income: number;
+      wealth: number;
+      satisfaction: number;
+      life_stage: string;
+      monthly_payment?: number;
+      mortgage_balance?: number;
+      mortgage_interest_rate?: number;
+      mortgage_term?: number;
     };
   }>;
 }
@@ -602,7 +681,7 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
 
       {/* Main housing grid with move arrows overlay */}
       <Box sx={{ position: 'relative', flexGrow: 1 }}>
-        {/* Legends */}
+        {/* Updated Legends */}
         <Paper elevation={1} sx={{ p: 2, mb: 3 }}>
           {/* Occupancy Status */}
           <Box sx={{ mb: 2 }}>
@@ -611,8 +690,12 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
             </Typography>
             <Box sx={{ display: 'flex', gap: 3 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <HomeIcon sx={{ color: colors.ownerOccupied }} />
+                <Typography variant="body2">Owner Occupied</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <HomeIcon sx={{ color: colors.occupied }} />
-                <Typography variant="body2">Occupied</Typography>
+                <Typography variant="body2">Rented</Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <HomeIcon sx={{ color: colors.vacant }} />
@@ -698,6 +781,7 @@ const HousingGrid: React.FC<HousingGridProps> = ({ units }) => {
                   occupants={unit.occupants}
                   rent={unit.rent}
                   is_occupied={unit.is_occupied}
+                  is_owner_occupied={unit.is_owner_occupied}
                   quality={unit.quality}
                   lastRenovation={unit.lastRenovation}
                   household={unit.household}

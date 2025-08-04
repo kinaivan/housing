@@ -31,6 +31,20 @@ class RentalUnit:
         self.depreciation_rate = 0.01  # 1% per period
         self.maintenance_cost = base_rent * 0.1  # 10% of rent
         
+        # Ownership status
+        self.is_owner_occupied = False
+        self.owner = None
+        self.market_value = self._calculate_market_value()
+        self.for_sale = False
+        self.sale_price = None
+
+    @property
+    def household(self):
+        """Return the primary household (tenant or owner) of this unit."""
+        if self.is_owner_occupied:
+            return self.owner
+        return self.tenant
+
     def _generate_amenities(self):
         amenity_list = ['parking', 'balcony', 'garden', 'gym', 'pool', 'security']
         return {amenity: random.random() < 0.3 for amenity in amenity_list}
@@ -96,9 +110,20 @@ class RentalUnit:
         self.occupants = household.size
         
         # If unit was previously vacant, gradually restore rent to market levels
-        if hasattr(self, 'rent_reduction_history') and self.rent_reduction_history:
+        if hasattr(self, 'rent_reduction_history'):
             # Start restoring rent to base rent over time
             self.rent = min(self.base_rent, self.rent * 1.05)  # 5% increase per occupancy
+
+    def assign_owner(self, household):
+        """Assign an owner to this unit (for owner-occupied units)"""
+        self.owner = household
+        self.is_owner_occupied = True
+        self.occupied = True
+        self.landlord = None  # Remove landlord when owner-occupied
+        self.tenant = None
+        self.tenants = []
+        self.vacancy_duration = 0
+        self.occupants = household.size  # Set occupants count
 
     def assign_multiple(self, households):
         """Assign multiple households to share this unit"""
@@ -124,6 +149,8 @@ class RentalUnit:
                 self.tenant = household
                 self.occupied = True
                 self.vacancy_duration = 0
+            # Update occupants count
+            self.occupants = sum(h.size for h in self.tenants)
 
     def remove_tenant(self, household):
         """Remove a specific tenant from shared unit"""
@@ -147,6 +174,9 @@ class RentalUnit:
         self.tenants = []
         self.occupied = False
         self.occupants = 0
+        if self.is_owner_occupied:
+            self.owner = None
+            self.is_owner_occupied = False
 
     def get_total_household_size(self):
         """Get total number of people living in the unit"""
@@ -209,6 +239,108 @@ class RentalUnit:
         
         return max(self.base_rent * 0.5, market_rent)  # Don't go below 50% of base rent
 
+    def _calculate_market_value(self):
+        """Calculate the market value of the property"""
+        # Base value from land value
+        land_component = self.base_land_value
+        
+        # Building value based on quality and size
+        building_value = self.base_rent * 12 * 15  # Rough estimate: 15 years of rent
+        building_value *= self.quality  # Adjust for quality
+        building_value *= (self.size / 2)  # Adjust for size
+        
+        # Location premium
+        location_premium = np.exp(self.location * 2) / np.e
+        
+        # Combine components
+        total_value = (land_component + building_value) * location_premium
+        
+        return total_value
+
+    def update_market_value(self, market_conditions):
+        """Update the market value based on current conditions"""
+        base_value = self._calculate_market_value()
+        
+        # Market demand affects value
+        demand_factor = market_conditions.get('market_demand', 0.5)
+        demand_multiplier = 0.8 + (demand_factor * 0.4)  # 0.8-1.2 range
+        
+        # Price index affects value
+        price_index = market_conditions.get('price_index', 100) / 100
+        
+        # Quality affects value
+        quality_multiplier = 0.8 + (self.quality * 0.4)  # 0.8-1.2 range
+        
+        # Calculate final market value
+        self.market_value = base_value * demand_multiplier * price_index * quality_multiplier
+        
+        # If for sale, update sale price
+        if self.for_sale:
+            self.sale_price = self.market_value * random.uniform(0.9, 1.1)  # +/- 10%
+        
+        return self.market_value
+
+    def list_for_sale(self, price=None):
+        """Put the unit up for sale"""
+        self.for_sale = True
+        self.sale_price = price if price is not None else self.market_value
+        return self.sale_price
+
+    def remove_from_market(self):
+        """Remove the unit from the sale market"""
+        self.for_sale = False
+        self.sale_price = None
+
+    def remove_owner(self):
+        """Remove the owner from this unit"""
+        self.owner = None
+        self.is_owner_occupied = False
+        self.occupied = False
+        self.vacancy_duration = 0
+
+    def calculate_monthly_costs(self, include_mortgage=True):
+        """Calculate monthly costs for the owner"""
+        # Property tax (assumed 1% annual)
+        property_tax = self.market_value * 0.01 / 12
+        
+        # Maintenance
+        maintenance = self.maintenance_cost
+        
+        # Insurance (assumed 0.5% annual)
+        insurance = self.market_value * 0.005 / 12
+        
+        # HOA/other fees
+        other_fees = self.base_rent * 0.05  # 5% of base rent
+        
+        total = property_tax + maintenance + insurance + other_fees
+        
+        # Add mortgage if applicable and requested
+        if include_mortgage and self.owner and hasattr(self.owner, 'monthly_payment'):
+            total += self.owner.monthly_payment
+        
+        return total
+
+    def calculate_ownership_roi(self, down_payment, holding_period=5):
+        """Calculate expected ROI for potential buyers"""
+        # Monthly costs
+        monthly_costs = self.calculate_monthly_costs()
+        annual_costs = monthly_costs * 12
+        
+        # Expected appreciation (conservative estimate)
+        annual_appreciation = 0.03  # 3% per year
+        future_value = self.market_value * (1 + annual_appreciation) ** holding_period
+        
+        # Total investment
+        total_investment = down_payment + (annual_costs * holding_period)
+        
+        # Expected return
+        total_return = future_value - self.market_value
+        
+        # Calculate ROI
+        roi = (total_return - total_investment) / total_investment
+        
+        return roi
+
     def __str__(self):
         return f"Unit {self.id}: ${self.rent:.0f}, Quality: {self.quality:.2f}, {'Occupied' if self.occupied else 'Vacant'}"
 
@@ -220,10 +352,11 @@ class Landlord:
         self.total_profit = 0
         self.wealth = 0  # Initialize wealth
         
-        # Landlord behavior parameters
-        self.greed_factor = random.uniform(0.5, 1.5)  # How aggressively they raise rents
-        self.market_awareness = random.uniform(0.7, 1.0)  # How well they track market conditions
-        self.maintenance_priority = random.uniform(0.3, 1.0)  # How much they prioritize maintenance
+        # Landlord behavior parameters - make more aggressive
+        self.greed_factor = random.uniform(1.0, 2.5)  # Increased from 0.5-1.5 to 1.0-2.5
+        self.market_awareness = random.uniform(0.8, 1.0)  # Increased from 0.7-1.0
+        self.maintenance_priority = random.uniform(0.3, 1.0)  # Keep same
+        self.risk_tolerance = random.uniform(0.2, 0.7)  # Reduced from 0.3-0.8 (more risk-averse)
         
         # Assign self as landlord to all units
         for unit in units:
@@ -269,18 +402,18 @@ class Landlord:
                 unit.rent *= (1 + cycle_adjustment)
             else:
                 # Occupied units: balance market conditions with tenant retention
-                base_adjustment = 0.02 * self.greed_factor * self.market_awareness
+                base_adjustment = 0.05 * self.greed_factor * self.market_awareness  # Increased from 0.02
                 
-                # Apply market pressure (can be negative)
-                total_adjustment = base_adjustment + market_adjustment * 0.05
+                # Apply market pressure (can be negative) - increased impact
+                total_adjustment = base_adjustment + market_adjustment * 0.15  # Increased from 0.05
                 
-                # Factor in wealth trend
+                # Factor in wealth trend - more aggressive
                 if wealth_trend < -0.1:  # Significant wealth decrease
                     # More aggressive rent increase when losing money
-                    total_adjustment += abs(wealth_trend) * 0.1 * self.greed_factor
+                    total_adjustment += abs(wealth_trend) * 0.25 * self.greed_factor  # Increased from 0.1
                 elif wealth_trend > 0.1:  # Significant wealth increase
                     # More conservative with increases when doing well
-                    total_adjustment *= 0.8
+                    total_adjustment *= 0.6  # Reduced from 0.8 (more conservative when doing well)
                 
                 # Tenant satisfaction consideration
                 if len(unit.tenants) > 0:
@@ -305,13 +438,17 @@ class Landlord:
                 
                 # Apply policy limits for compliant landlords
                 if self.is_compliant and policy is not None:
-                    max_increase = policy.max_increase_rate
-                    # Policy typically only limits increases, not decreases
-                    if total_adjustment > 0:
-                        desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
+                    if hasattr(policy, 'check_rent_increase'):
+                        # Use policy's rent increase checking method
+                        desired_rent = policy.check_rent_increase(unit.rent, desired_rent)
+                    else:
+                        # Fallback to old method
+                        max_increase = policy.max_increase_rate
+                        if total_adjustment > 0:
+                            desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
                 elif self.is_compliant:
-                    # Default max increase rate when no policy is in effect
-                    max_increase = 0.10  # 10% default max increase
+                    # Default max increase rate when no policy is in effect - make more aggressive
+                    max_increase = 0.15  # Increased from 0.10 to 0.15 for free market
                     if total_adjustment > 0:
                         desired_rent = min(desired_rent, unit.rent * (1 + max_increase))
                 
@@ -488,3 +625,157 @@ class Landlord:
             'average_rent_reduction': avg_rent_reduction,
             'vacant_units_count': len(vacant_units)
         }
+
+    def consider_selling_units(self, market_conditions):
+        """Evaluate whether to sell any units based on market conditions and returns"""
+        units_to_sell = []
+        
+        # Market factors that encourage selling
+        market_demand = market_conditions.get('market_demand', 0.5)
+        price_index = market_conditions.get('price_index', 100) / 100
+        interest_rates = market_conditions.get('interest_rates', 0.03)
+        
+        # Calculate portfolio metrics
+        portfolio_stats = self.get_portfolio_stats()
+        portfolio_roi = portfolio_stats['total_profit'] / max(1, self.wealth)
+        
+        for unit in self.units:
+            # Skip if already for sale
+            if unit.for_sale:
+                continue
+                
+            # Update unit's market value and land value
+            unit.update_market_value(market_conditions)
+            unit.update_land_value(market_conditions)
+            
+            # Calculate annual costs including LVT
+            annual_rent = unit.rent * 12
+            annual_maintenance = unit.maintenance_cost * 12
+            lvt_cost = unit.land_value * 0.40  # 40% LVT
+            total_annual_costs = annual_maintenance + lvt_cost
+            
+            # Calculate unit's ROI after LVT
+            unit_roi = (annual_rent - total_annual_costs) / unit.market_value
+            
+            # Score factors for selling
+            sell_score = 0
+            
+            # Market timing factors
+            sell_score += (market_demand - 0.5) * 2  # High demand increases score
+            sell_score += (price_index - 1) * 2  # High prices increase score
+            
+            # Unit performance factors
+            if unit.occupied:
+                sell_score -= 0.5  # Occupied units less likely to be sold
+            else:
+                sell_score += unit.vacancy_duration * 0.1  # Long vacancies encourage selling
+            
+            # LVT impact on ROI
+            lvt_burden = lvt_cost / annual_rent if annual_rent > 0 else float('inf')
+            if lvt_burden > 0.3:  # If LVT takes more than 30% of rental income
+                sell_score += 2
+            
+            if unit_roi < 0.05:  # Less than 5% return
+                sell_score += 1.5  # Increased from 1 to 1.5 due to higher LVT impact
+            
+            # Land value proportion factor
+            land_value_ratio = unit.land_value / unit.market_value
+            if land_value_ratio > 0.6:  # If land is more than 60% of total value
+                sell_score += land_value_ratio * 2  # High land value ratio encourages selling
+            
+            if unit.quality < 0.4:  # Poor quality units
+                sell_score += 1
+            
+            # Portfolio diversification
+            if len(self.units) > 5:  # Maintain minimum portfolio size
+                sell_score += 0.5  # More willing to sell if have many units
+            
+            # Financial pressure
+            if self.wealth < 0:
+                sell_score += 1.5  # Increased from 1 to 1.5 due to higher LVT impact
+            
+            # Adjust based on landlord's risk tolerance
+            sell_score *= (1 - self.risk_tolerance)
+            
+            # Decision to sell - lower threshold due to LVT pressure
+            if sell_score > 1.2:  # Reduced from 1.5 to 1.2 to trigger more sales
+                sale_price = unit.market_value * random.uniform(1.0, 1.1)  # Reduced markup to encourage sales
+                unit.list_for_sale(sale_price)
+                units_to_sell.append(unit)
+        
+        return units_to_sell
+
+    def sell_unit(self, unit, sale_price):
+        """Complete the sale of a unit"""
+        if unit in self.units:
+            # Remove unit from portfolio
+            self.units.remove(unit)
+            unit.landlord = None
+            
+            # Add sale proceeds to wealth
+            self.wealth += sale_price
+            self.total_profit += (sale_price - unit.market_value)  # Record capital gain/loss
+            
+            # If unit is occupied, maintain tenant until lease ends
+            if unit.occupied:
+                unit.for_sale = False
+                unit.sale_price = None
+            
+            return True
+        return False
+
+    def consider_buying_units(self, available_units, market_conditions):
+        """Evaluate whether to buy any available units"""
+        if self.wealth <= 0:
+            return []  # Can't buy without capital
+            
+        units_to_buy = []
+        max_units_to_buy = min(3, self.wealth // 100000)  # Limit number of purchases
+        
+        for unit in available_units:
+            if len(units_to_buy) >= max_units_to_buy:
+                break
+                
+            if not unit.for_sale:
+                continue
+            
+            # Calculate expected ROI
+            expected_roi = self._calculate_expected_roi(unit, market_conditions)
+            
+            # Minimum ROI threshold based on risk tolerance
+            min_roi = 0.05 + (0.05 * (1 - self.risk_tolerance))
+            
+            if expected_roi > min_roi and unit.sale_price <= self.wealth:
+                units_to_buy.append(unit)
+        
+        return units_to_buy
+
+    def _calculate_expected_roi(self, unit, market_conditions):
+        """Calculate expected ROI for a potential purchase"""
+        # Projected annual rent income
+        market_rent = unit.calculate_market_rent(market_conditions)
+        annual_rent = market_rent * 12
+        
+        # Annual costs including LVT
+        annual_maintenance = unit.maintenance_cost * 12
+        property_tax = unit.market_value * 0.01  # 1% annual
+        insurance = unit.market_value * 0.005  # 0.5% annual
+        lvt_cost = unit.land_value * 0.40  # 40% LVT
+        total_costs = annual_maintenance + property_tax + insurance + lvt_cost
+        
+        # Expected appreciation (reduced due to LVT impact on land value)
+        land_value_ratio = unit.land_value / unit.market_value
+        building_value_ratio = 1 - land_value_ratio
+        # Land value appreciation is reduced due to LVT, building value appreciates normally
+        expected_appreciation = (0.01 * land_value_ratio + 0.03 * building_value_ratio)
+        
+        # Net operating income
+        noi = annual_rent - total_costs
+        
+        # Total return including appreciation
+        total_return = noi + (unit.market_value * expected_appreciation)
+        
+        # ROI calculation
+        roi = total_return / unit.sale_price
+        
+        return roi

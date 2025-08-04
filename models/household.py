@@ -3,21 +3,12 @@ import collections
 import random
 import numpy as np
 from .dutch_names import generate_dutch_name
+from .contract import Contract
 
 TimeLineEntry = collections.namedtuple('TimeLineEntry', ('year', 'period', 'record'))
 
 def new_timeline_entry(info, year, period):
     return TimeLineEntry(year, period, info)
-
-class Contract:
-    def __init__(self, tenant, unit):
-        self.tenant = tenant
-        self.unit = unit
-        self.months = 0
-        self.start_date = None  # Could be used for lease terms
-
-    def update(self):
-        self.months += 1
 
 class Household:
     def __init__(self, id, age, size, income, wealth, contract=None, is_owner_occupier=False, mortgage_balance=0, mortgage_interest_rate=0.03, mortgage_term=30):
@@ -62,20 +53,28 @@ class Household:
         self.mortgage_term = mortgage_term  # in years
         self.mortgage_interest_paid = 0
         self.monthly_payment = 0
-        if self.is_owner_occupier and self.mortgage_balance > 0:
-            r = self.mortgage_interest_rate / 12
-            n = self.mortgage_term * 12
-            self.monthly_payment = (self.mortgage_balance * r * (1 + r) ** n) / ((1 + r) ** n - 1)
+        if mortgage_balance > 0:
+            # Calculate monthly payment using the mortgage formula
+            r = mortgage_interest_rate / 12  # Monthly interest rate
+            n = mortgage_term * 12  # Total number of payments
+            self.monthly_payment = mortgage_balance * (r * (1 + r)**n) / ((1 + r)**n - 1)
 
     def _determine_life_stage(self):
+        """Determine the household's life stage based on age and size."""
         if self.age < 25:
             return "young_adult"
         elif self.age < 35:
-            return "family_formation"
+            if self.size > 1:
+                return "family_formation"
+            return "young_professional"
         elif self.age < 55:
-            return "established"
+            if self.size > 2:
+                return "established_family"
+            return "established_professional"
         else:
-            return "retirement"
+            if self.size > 1:
+                return "senior_family"
+            return "senior_single"
 
     def current_rent_burden(self):
         if self.is_owner_occupier:
@@ -179,53 +178,158 @@ class Household:
             }, None, None)
 
     def _adjust_preferences_for_life_stage(self):
+        """Adjust household preferences based on their life stage."""
+        # Reset preferences to avoid compounding effects
+        self.mobility_preference = random.uniform(0, 1)
+        self.quality_preference = random.uniform(0, 1)
+        self.cost_sensitivity = random.uniform(0.2, 0.5)
+        self.location_preference = random.uniform(0, 1)
+        self.risk_aversion = random.uniform(0, 1)
+
         if self.life_stage == "young_adult":
+            # Young adults: Urban, mobile, cost-sensitive, quality-flexible
             self.quality_preference *= 0.8  # Less emphasis on quality
-            self.location_preference *= 1.2  # More emphasis on location
+            self.location_preference *= 1.2  # More urban preference
             self.mobility_preference *= 1.2  # More likely to move
             self.cost_sensitivity *= 1.1  # More sensitive to costs
+            self.risk_aversion *= 0.8  # More willing to take risks
+            self.size_preference = min(2, self.size)  # Small units
+        
+        elif self.life_stage == "young_professional":
+            # Young professionals: Urban, quality-focused, less cost-sensitive
+            self.quality_preference *= 1.1  # Good quality
+            self.location_preference *= 1.3  # Strong urban preference
+            self.mobility_preference *= 1.1  # Quite mobile
+            self.cost_sensitivity *= 0.9  # Less cost sensitive
+            self.risk_aversion *= 0.9  # Willing to take risks
+            self.size_preference = min(2, self.size)  # Small to medium units
+        
         elif self.life_stage == "family_formation":
-            self.size_preference = max(self.size_preference, 2)
-            self.quality_preference *= 1.2
-            self.location_preference *= 0.9
-            self.mobility_preference *= 0.8  
-            self.cost_sensitivity *= 0.9
-        elif self.life_stage == "established":
-            self.quality_preference *= 1.3
-            self.cost_sensitivity *= 0.8
-            self.mobility_preference *= 0.7  
-            self.location_preference *= 0.8
-        else:
-            self.cost_sensitivity *= 1.2
-            self.mobility_preference *= 0.6
-            self.quality_preference *= 1.1
-            self.location_preference *= 0.7 
+            # Families forming: Suburban, space-focused, quality-conscious
+            self.quality_preference *= 1.2  # Higher quality standards
+            self.location_preference *= 0.9  # More suburban
+            self.mobility_preference *= 0.8  # Less likely to move
+            self.cost_sensitivity *= 0.9  # Less cost sensitive
+            self.risk_aversion *= 1.2  # More risk averse
+            self.size_preference = max(self.size, 2)  # Need space for family
+        
+        elif self.life_stage == "established_professional":
+            # Established professionals: Quality-focused, location-flexible
+            self.quality_preference *= 1.3  # High quality standards
+            self.location_preference *= 1.1  # Good location important
+            self.mobility_preference *= 0.9  # Somewhat settled
+            self.cost_sensitivity *= 0.8  # Less cost sensitive
+            self.risk_aversion *= 1.0  # Balanced risk approach
+            self.size_preference = max(1, min(3, self.size + 1))  # Comfortable space
+        
+        elif self.life_stage == "established_family":
+            # Established families: Space and quality focused, settled
+            self.quality_preference *= 1.4  # Very high quality standards
+            self.location_preference *= 0.8  # Suburban preference
+            self.mobility_preference *= 0.7  # Very settled
+            self.cost_sensitivity *= 0.7  # Less cost sensitive
+            self.risk_aversion *= 1.3  # Very risk averse
+            self.size_preference = max(self.size, 3)  # Need family space
+        
+        elif self.life_stage == "senior_family":
+            # Senior families: Quality-focused, less mobile
+            self.quality_preference *= 1.2  # Good quality important
+            self.location_preference *= 0.7  # Less location dependent
+            self.mobility_preference *= 0.6  # Very settled
+            self.cost_sensitivity *= 1.1  # More cost aware
+            self.risk_aversion *= 1.4  # Very risk averse
+            self.size_preference = max(2, min(self.size, 4))  # Family space but not too large
+        
+        else:  # senior_single
+            # Senior singles: Downsizing, quality-conscious, cost-sensitive
+            self.quality_preference *= 1.1  # Still care about quality
+            self.location_preference *= 0.8  # Less location dependent
+            self.mobility_preference *= 0.7  # Less likely to move
+            self.cost_sensitivity *= 1.2  # More cost sensitive
+            self.risk_aversion *= 1.3  # Risk averse
+            self.size_preference = min(2, self.size)  # Downsizing
 
     def adjust_income(self):
-        # More sophisticated income adjustment based on life stage
-        base_drift = random.uniform(-0.02, 0.05)
+        """
+        Adjust income based on life stage and random factors.
+        Returns a multiplier for wealth adjustment.
+        """
+        # Base income drift (slightly positive on average)
+        base_drift = random.normalvariate(0.01, 0.02)  # Mean 1% growth with 2% std dev
+        
+        # Life stage affects income growth
         life_stage_multiplier = {
-            "young_adult": 1.2,
-            "family_formation": 1.1,
-            "established": 1.0,
-            "retirement": 0.8
+            "young_adult": 1.2,         # High growth potential
+            "young_professional": 1.5,   # Highest growth potential
+            "family_formation": 1.3,     # Strong growth
+            "established_professional": 1.1,  # Moderate growth
+            "established_family": 1.1,   # Moderate growth
+            "senior_family": 0.8,        # Declining growth
+            "senior_single": 0.7         # Lowest growth
         }
+        
+        # Apply life stage multiplier
         drift = base_drift * life_stage_multiplier[self.life_stage]
-        self.income = max(500, self.income * (1 + drift))
+        
+        # Add some randomness
+        noise = random.normalvariate(0, 0.01)  # Small random fluctuations
+        total_change = 1 + drift + noise
+        
+        # Apply the change
+        self.income *= total_change
+        
+        # Ensure minimum income
+        self.income = max(self.income, 1200)  # Minimum €1200/month
+        
+        # Return the multiplier for wealth adjustment
+        return total_change
 
     def adjust_wealth(self):
-        # More sophisticated wealth accumulation
-        base_saving_rate = 0.1
-        life_stage_multiplier = {
-            "young_adult": 0.8,  # Lower savings
-            "family_formation": 0.9,
-            "established": 1.2,  # Higher savings
-            "retirement": 1.0
+        """More sophisticated wealth accumulation"""
+        # Base wealth change from income (savings rate based on life stage)
+        life_stage_savings_rate = {
+            "young_adult": 0.05,         # Low savings rate
+            "young_professional": 0.15,   # Higher savings potential
+            "family_formation": 0.10,     # Moderate savings
+            "established_professional": 0.20,  # Peak savings
+            "established_family": 0.15,   # Good savings
+            "senior_family": 0.10,        # Moderate savings
+            "senior_single": 0.05         # Low savings
         }
-        saving_rate = base_saving_rate * life_stage_multiplier[self.life_stage]
-        housing_cost = self.contract.unit.rent if self.contract else 0
-        savings = max(0, self.income - housing_cost) * saving_rate
-        self.wealth += savings
+        
+        # Calculate base savings
+        savings_rate = life_stage_savings_rate[self.life_stage]
+        monthly_savings = self.income * savings_rate
+        
+        # Investment returns (if wealth is positive)
+        if self.wealth > 0:
+            # Base return (slightly positive on average)
+            base_return = random.normalvariate(0.02, 0.04)  # 2% mean return with 4% volatility
+            
+            # Life stage affects investment strategy/returns
+            life_stage_risk = {
+                "young_adult": 1.2,         # Higher risk/return
+                "young_professional": 1.3,   # Highest risk/return
+                "family_formation": 1.1,     # Moderate risk
+                "established_professional": 1.0,  # Balanced
+                "established_family": 0.9,   # More conservative
+                "senior_family": 0.7,        # Conservative
+                "senior_single": 0.6         # Most conservative
+            }
+            
+            # Apply risk multiplier
+            investment_return = base_return * life_stage_risk[self.life_stage]
+            
+            # Calculate wealth change from investments
+            investment_change = self.wealth * investment_return
+        else:
+            investment_change = 0
+        
+        # Update wealth
+        self.wealth += monthly_savings + investment_change
+        
+        # Ensure minimum wealth
+        self.wealth = max(self.wealth, 0)  # Can't go below 0
 
     def calculate_satisfaction(self):
         if not self.contract:
@@ -480,29 +584,30 @@ class Household:
             self.search_duration = 0
 
     def move_to(self, unit, year, period):
-        """Move household to a new unit"""
-        old_unit = self.contract.unit if self.contract else None
-        old_unit_id = old_unit.id if old_unit else None
-        
-        # End current contract if exists
+        """Move this household to a new unit"""
+        # End current contract if any
         if self.contract:
             old_unit = self.contract.unit
             old_unit.remove_tenant(self)
             self.contract = None
-            
+            self.housed = False
+        
         # Create new contract
         self.contract = Contract(self, unit)
-        unit.add_tenant(self)
+        unit.assign(self)
         self.housed = True
-        self.months_in_current_unit = 0
+        self.months_in_current_unit = 0  # Reset duration in new unit
+
+        # Calculate initial satisfaction
+        self.calculate_satisfaction()
         
         # Record the move
         self.add_event({
-            "type": "MOVED_IN",
+            "type": "MOVE",
             "unit_id": unit.id,
-            "old_unit_id": old_unit_id,
             "rent": unit.rent,
-            "quality": unit.quality
+            "satisfaction": self.satisfaction,
+            "rent_burden": self.current_rent_burden()
         }, year, period)
 
     def _determine_move_reason(self, new_unit):
@@ -593,26 +698,32 @@ class Household:
             self.income += interest  # crude, but for visualization
 
     def buy_home(self, unit, property_value=None):
+        """Buy a home and become an owner-occupier"""
         # Remove from rental if currently renting
         if self.contract:
-            self.contract.unit.vacate()
+            old_unit = self.contract.unit
+            old_unit.remove_tenant(self)
             self.contract = None
-        # Pay down payment, set up mortgage
-        if property_value is None:
-            property_value = unit.base_rent * 12 * 15  # More conservative fallback
-        down_payment = 0.2 * property_value
-        mortgage_balance = 0.8 * property_value
-        self.wealth -= down_payment
+            self.housed = False
+
+        # Set ownership status
         self.is_owner_occupier = True
-        self.mortgage_balance = mortgage_balance
-        self.mortgage_interest_rate = 0.03
-        self.mortgage_term = 30
-        r = self.mortgage_interest_rate / 12
-        n = self.mortgage_term * 12
-        self.monthly_payment = (mortgage_balance * r * (1 + r) ** n) / ((1 + r) ** n - 1)
-        self.housed = True
-        self.owned_unit = unit
         unit.assign_owner(self)
+        self.owned_unit = unit
+        self.housed = True
+        self.months_in_current_unit = 0  # Reset duration in new unit
+
+        # Calculate initial satisfaction
+        self.calculate_satisfaction_owner()
+
+        # Record the purchase
+        self.add_event({
+            "type": "HOME_PURCHASE",
+            "unit_id": unit.id,
+            "property_value": property_value or unit.market_value,
+            "mortgage_balance": self.mortgage_balance,
+            "monthly_payment": self.monthly_payment
+        }, None, None)
 
     def sell_home(self, property_value=None):
         unit = getattr(self, 'owned_unit', None)
@@ -756,3 +867,241 @@ class Household:
         score += location_score
 
         return score
+
+    def consider_buying(self, market, policy, year, period):
+        """Consider whether to buy a home instead of renting"""
+        # Skip if already an owner
+        if self.is_owner_occupier:
+            return False
+            
+        # Basic qualification checks
+        if self.wealth < 20000 or self.income < 40000:
+            return False  # Not enough savings/income
+            
+        # Life stage considerations
+        life_stage_multiplier = {
+            "young_adult": 0.3,
+            "family_formation": 1.2,
+            "established": 1.0,
+            "retirement": 0.5
+        }
+        
+        # Calculate buying propensity
+        base_propensity = 0.1  # Base 10% chance
+        
+        # Adjust for life stage
+        base_propensity *= life_stage_multiplier[self.life_stage]
+        
+        # Adjust for current housing satisfaction
+        if self.contract:
+            if self.satisfaction < 0.4:
+                base_propensity *= 1.5  # More likely to buy if unhappy renting
+            elif self.satisfaction > 0.8:
+                base_propensity *= 0.5  # Less likely if very happy renting
+        
+        # Adjust for rent burden
+        rent_burden = self.current_rent_burden()
+        if rent_burden > 0.4:
+            base_propensity *= 1.3  # More likely to buy if rent is high
+        
+        # Adjust for wealth
+        wealth_years_of_rent = self.wealth / (self.contract.unit.rent * 12 if self.contract else self.income * 0.3)
+        if wealth_years_of_rent > 2:  # More than 2 years of rent in savings
+            base_propensity *= 1.5
+        
+        # Market conditions affect decision
+        market_demand = market.market_conditions.get('market_demand', 0.5)
+        price_index = market.market_conditions.get('price_index', 100) / 100
+        interest_rates = market.market_conditions.get('interest_rates', 0.03)
+        
+        # Adjust for market conditions
+        if price_index > 1.2:  # Prices 20% above baseline
+            base_propensity *= 0.7  # Less likely to buy when prices are high
+        if interest_rates > 0.05:  # High interest rates
+            base_propensity *= 0.8  # Less likely to buy with high rates
+        
+        # Make decision to look for homes
+        if random.random() < base_propensity:
+            return self._search_for_home_to_buy(market, policy, year, period)
+        
+        return False
+
+    def _search_for_home_to_buy(self, market, policy, year, period):
+        """Search for a home to buy"""
+        available_units = [u for u in market.units if u.for_sale]
+        if not available_units:
+            return False
+            
+        scored_units = []
+        for unit in available_units:
+            # Skip if clearly unaffordable
+            max_price = min(
+                self.income * 5,  # 5x annual income max
+                (self.wealth / 0.2)  # Assuming 20% down payment
+            )
+            if unit.sale_price > max_price:
+                continue
+            
+            # Calculate monthly payment
+            down_payment = unit.sale_price * 0.2
+            loan_amount = unit.sale_price - down_payment
+            r = 0.03 / 12  # Monthly interest rate (3% annual)
+            n = 30 * 12    # 30-year term in months
+            monthly_payment = (loan_amount * r * (1 + r) ** n) / ((1 + r) ** n - 1)
+            
+            # Calculate total monthly costs
+            monthly_costs = unit.calculate_monthly_costs()
+            total_monthly = monthly_payment + monthly_costs
+            
+            # Skip if monthly costs too high
+            if total_monthly > self.income / 12 * 0.4:  # 40% DTI ratio
+                continue
+            
+            # Score the unit
+            score = self._score_unit_for_purchase(unit, monthly_costs, market)
+            scored_units.append((score, unit))
+        
+        if scored_units:
+            # Sort by score
+            scored_units.sort(key=lambda x: x[0], reverse=True)
+            best_unit = scored_units[0][1]
+            
+            # Make offer if good enough
+            if scored_units[0][0] > 0.7:  # Minimum score threshold
+                return self._make_offer(best_unit, market, year, period)
+        
+        return False
+
+    def _score_unit_for_purchase(self, unit, monthly_costs, market):
+        """Score a unit for potential purchase"""
+        score = 0
+        
+        # Affordability (0-40 points)
+        monthly_income = self.income / 12
+        cost_ratio = monthly_costs / monthly_income
+        if cost_ratio <= 0.28:
+            score += 40
+        elif cost_ratio <= 0.33:
+            score += 30
+        elif cost_ratio <= 0.38:
+            score += 20
+        elif cost_ratio <= 0.43:
+            score += 10
+        
+        # Quality and Features (0-30 points)
+        quality_score = unit.quality * 20
+        amenity_score = unit.amenity_score * 10
+        score += quality_score + amenity_score
+        
+        # Size Match (0-15 points)
+        size_diff = abs(self.size_preference - unit.size)
+        if size_diff == 0:
+            score += 15
+        elif size_diff == 1:
+            score += 10
+        elif size_diff == 2:
+            score += 5
+        
+        # Location (0-15 points)
+        location_match = 1 - abs(self.location_preference - unit.location)
+        score += location_match * 15
+        
+        # Normalize to 0-1
+        return score / 100
+
+    def _make_offer(self, unit, market, year, period):
+        """Make an offer on a unit"""
+        # Calculate maximum affordable price
+        max_price = min(
+            self.income * 5,  # 5x annual income max
+            (self.wealth / 0.2)  # Assuming 20% down payment
+        )
+        
+        # Calculate offer price
+        market_demand = market.market_conditions.get('market_demand', 0.5)
+        if market_demand > 0.7:  # Hot market
+            offer_price = unit.sale_price  # Offer asking price
+        else:
+            # Offer 90-98% of asking price
+            offer_ratio = random.uniform(0.9, 0.98)
+            offer_price = unit.sale_price * offer_ratio
+        
+        # Ensure offer is within budget
+        offer_price = min(offer_price, max_price)
+        
+        # If offer accepted
+        if offer_price >= unit.sale_price * 0.9:  # Seller accepts if within 10% of asking
+            # Process purchase
+            down_payment = offer_price * 0.2
+            self.buy_home(unit, offer_price)
+            
+            # Record the purchase
+            self.add_event({
+                "type": "HOME_PURCHASE",
+                "unit_id": unit.id,
+                "price": offer_price,
+                "down_payment": down_payment,
+                "mortgage_amount": offer_price - down_payment
+            }, year, period)
+            
+            return True
+        
+        return False
+
+    def consider_selling_home(self, market, year, period):
+        """Consider whether to sell current home"""
+        if not self.is_owner_occupier:
+            return False
+            
+        unit = self.owned_unit
+        if not unit:
+            return False
+            
+        # Update market value
+        unit.update_market_value(market.market_conditions)
+        
+        # Factors to consider selling
+        sell_score = 0
+        
+        # Life stage transitions
+        if self.life_stage == "retirement":
+            sell_score += 0.3  # More likely to downsize
+        elif self.life_stage == "young_adult":
+            sell_score += 0.2  # More likely to move for opportunities
+        
+        # Financial pressure
+        if self.current_rent_burden() > 0.5:  # High housing costs
+            sell_score += 0.3
+        if self.wealth < 0:  # Financial distress
+            sell_score += 0.4
+        
+        # Market timing
+        market_demand = market.market_conditions.get('market_demand', 0.5)
+        price_index = market.market_conditions.get('price_index', 100) / 100
+        
+        if price_index > 1.2:  # Significant appreciation
+            sell_score += 0.3
+        if market_demand > 0.7:  # Strong seller's market
+            sell_score += 0.2
+        
+        # Property condition
+        if unit.quality < 0.4:  # Poor condition
+            sell_score += 0.2
+        
+        # Make decision
+        if random.random() < sell_score:
+            # List the property
+            sale_price = unit.market_value * random.uniform(1.05, 1.15)
+            unit.list_for_sale(sale_price)
+            
+            # Record the listing
+            self.add_event({
+                "type": "HOME_LISTED",
+                "unit_id": unit.id,
+                "asking_price": sale_price,
+                "market_value": unit.market_value
+            }, year, period)
+            
+            return True
+        
+        return False

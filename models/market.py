@@ -13,14 +13,22 @@ class RentalMarket:
             'market_demand': 0.5,
             'vacancy_rate': self._calculate_vacancy_rate(),
             'price_index': 100,  # Base price index
-            'location_premiums': self._calculate_location_premiums()
+            'location_premiums': self._calculate_location_premiums(),
+            'interest_rates': 0.03,  # Base mortgage rate
+            'sale_volume': 0,  # Number of sales in current period
+            'average_sale_price': 0,  # Average sale price in current period
+            'owner_occupancy_rate': self._calculate_owner_occupancy_rate()
         }
         self.historical_data = {
             'rents': [],
             'vacancy_rates': [],
             'price_indices': [],
-            'demand_levels': []
+            'demand_levels': [],
+            'sale_prices': [],
+            'sale_volumes': [],
+            'owner_occupancy_rates': []
         }
+        self.transactions = []  # Track property transactions
 
     def _calculate_average_rent(self):
         rents = [u.rent for u in self.units]
@@ -41,31 +49,131 @@ class RentalMarket:
             loc: np.mean(rents) if rents else 0 for loc, rents in location_rents.items()
         }
 
+    def _calculate_owner_occupancy_rate(self):
+        """Calculate the percentage of units that are owner-occupied"""
+        if not self.units:
+            return 0
+        owner_occupied = len([u for u in self.units if getattr(u, 'is_owner_occupied', False)])
+        return owner_occupied / len(self.units)
+
+    def process_property_sales(self):
+        """Process all pending property sales"""
+        sales_this_period = []
+        
+        # Get all units listed for sale
+        for_sale_units = [u for u in self.units if u.for_sale]
+        
+        # Track sales data
+        total_sale_price = 0
+        num_sales = 0
+        
+        for unit in for_sale_units:
+            # Skip if no valid sale price
+            if not unit.sale_price:
+                continue
+                
+            # If unit has a landlord, they're selling
+            if unit.landlord:
+                # Record the sale
+                sale_data = {
+                    'unit_id': unit.id,
+                    'seller_type': 'landlord',
+                    'seller_id': unit.landlord.id,
+                    'sale_price': unit.sale_price,
+                    'market_value': unit.market_value,
+                    'condition': unit.quality
+                }
+                sales_this_period.append(sale_data)
+                
+                # Update statistics
+                total_sale_price += unit.sale_price
+                num_sales += 1
+                
+                # Remove from landlord's portfolio
+                unit.landlord.sell_unit(unit, unit.sale_price)
+                
+            # If unit has an owner, they're selling
+            elif unit.owner:
+                # Record the sale
+                sale_data = {
+                    'unit_id': unit.id,
+                    'seller_type': 'owner_occupier',
+                    'seller_id': unit.owner.id,
+                    'sale_price': unit.sale_price,
+                    'market_value': unit.market_value,
+                    'condition': unit.quality
+                }
+                sales_this_period.append(sale_data)
+                
+                # Update statistics
+                total_sale_price += unit.sale_price
+                num_sales += 1
+                
+                # Process the sale
+                unit.owner.sell_home(unit.sale_price)
+            
+            # Reset unit's sale status
+            unit.remove_from_market()
+        
+        # Update market conditions with sales data
+        self.market_conditions['sale_volume'] = num_sales
+        self.market_conditions['average_sale_price'] = (
+            total_sale_price / num_sales if num_sales > 0 else 0
+        )
+        
+        # Store transactions
+        self.transactions.extend(sales_this_period)
+        
+        # Update historical data
+        self._store_sales_data()
+
+    def _store_sales_data(self):
+        """Store sales data in historical records"""
+        self.historical_data['sale_prices'].append(
+            self.market_conditions['average_sale_price']
+        )
+        self.historical_data['sale_volumes'].append(
+            self.market_conditions['sale_volume']
+        )
+        self.historical_data['owner_occupancy_rates'].append(
+            self._calculate_owner_occupancy_rate()
+        )
+
     def update_market_conditions(self):
         # Update basic metrics
         self.market_conditions.update({
             'average_rent': self._calculate_average_rent(),
             'vacancy_rate': self._calculate_vacancy_rate(),
-            'location_premiums': self._calculate_location_premiums()
+            'location_premiums': self._calculate_location_premiums(),
+            'owner_occupancy_rate': self._calculate_owner_occupancy_rate()
         })
 
-        # Update vacancy duration for all units (rent adjustments now handled by landlords)
+        # Process property sales
+        self.process_property_sales()
+
+        # Update vacancy duration for all units
         for unit in self.units:
-            if not unit.occupied and not getattr(unit, 'is_owner_occupied', False):
-                # Vacancy duration is now managed by the landlord's rent reduction strategy
-                # The market just tracks it for statistics
+            if not unit.occupied and not unit.is_owner_occupied:
                 pass
             else:
                 unit.vacancy_duration = 0
 
         # Update price index
         if self.historical_data['rents']:
-            base_rent = self.historical_data['rents'][0]  # First value is already a mean
+            base_rent = self.historical_data['rents'][0]
             current_rent = self._calculate_average_rent()
             if base_rent > 0:
                 self.market_conditions['price_index'] = (current_rent / base_rent) * 100
             else:
                 self.market_conditions['price_index'] = 100
+
+        # Update interest rates based on market conditions
+        base_rate = 0.03  # 3% base rate
+        demand_adjustment = (self.market_conditions['market_demand'] - 0.5) * 0.01
+        price_adjustment = (self.market_conditions['price_index'] - 100) / 1000
+        self.market_conditions['interest_rates'] = max(0.02, min(0.08, 
+            base_rate + demand_adjustment + price_adjustment
+        ))
 
         self._store_historical_data()
         self._update_market_demand()
@@ -148,18 +256,60 @@ class RentalMarket:
         return [u for u in self.units if not u.occupied]
 
     def get_market_statistics(self):
-        return {
-            'average_rent': self._calculate_average_rent(),
-            'vacancy_rate': self._calculate_vacancy_rate(),
-            'price_index': self.market_conditions['price_index'],
-            'market_demand': self.market_conditions['market_demand'],
-            'location_premiums': self.market_conditions['location_premiums']
-        }
+        stats = super().get_market_statistics()
+        stats.update({
+            'interest_rates': self.market_conditions['interest_rates'],
+            'sale_volume': self.market_conditions['sale_volume'],
+            'average_sale_price': self.market_conditions['average_sale_price'],
+            'owner_occupancy_rate': self.market_conditions['owner_occupancy_rate']
+        })
+        return stats
 
     def get_historical_trends(self):
+        trends = super().get_historical_trends()
+        trends.update({
+            'sale_price_trend': self.historical_data['sale_prices'],
+            'sale_volume_trend': self.historical_data['sale_volumes'],
+            'owner_occupancy_trend': self.historical_data['owner_occupancy_rates']
+        })
+        return trends
+
+    def get_for_sale_units(self, max_price=None, min_quality=None):
+        """Get list of units currently for sale matching criteria"""
+        units = [u for u in self.units if u.for_sale]
+        
+        if max_price is not None:
+            units = [u for u in units if u.sale_price <= max_price]
+            
+        if min_quality is not None:
+            units = [u for u in units if u.quality >= min_quality]
+            
+        return units
+
+    def get_recent_sales(self, num_periods=1):
+        """Get recent sales data for market analysis"""
+        if not self.transactions:
+            return []
+            
+        # Get sales from recent periods
+        recent_sales = self.transactions[-num_periods:]
+        
+        # Calculate summary statistics
+        if recent_sales:
+            prices = [s['sale_price'] for s in recent_sales]
+            return {
+                'num_sales': len(recent_sales),
+                'avg_price': np.mean(prices),
+                'min_price': min(prices),
+                'max_price': max(prices),
+                'price_std': np.std(prices),
+                'sales_data': recent_sales
+            }
         return {
-            'rent_trend': self.historical_data['rents'],
-            'vacancy_trend': self.historical_data['vacancy_rates'],
-            'price_index_trend': self.historical_data['price_indices'],
-            'demand_trend': self.historical_data['demand_levels']
+            'num_sales': 0,
+            'avg_price': 0,
+            'min_price': 0,
+            'max_price': 0,
+            'price_std': 0,
+            'sales_data': []
         }

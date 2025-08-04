@@ -43,10 +43,17 @@ def _serialize_frame(frame: Dict) -> str:
                 household_info = {
                     "id": household.id if hasattr(household, "id") else None,
                     "name": household.name if hasattr(household, "name") else None,
+                    "age": int(household.age) if hasattr(household, "age") else 0,
                     "income": int(household.income) if hasattr(household, "income") else 0,
                     "size": int(household.size) if hasattr(household, "size") else 0,
                     "satisfaction": float(household.satisfaction) if hasattr(household, "satisfaction") else 0,
                     "wealth": float(household.wealth) if hasattr(household, "wealth") else 0,
+                    "life_stage": str(household.life_stage) if hasattr(household, "life_stage") else "adult",
+                    "months_in_current_unit": int(household.months_in_current_unit) if hasattr(household, "months_in_current_unit") else 0,
+                    "monthly_payment": float(household.monthly_payment) if hasattr(household, "monthly_payment") else None,
+                    "mortgage_balance": float(household.mortgage_balance) if hasattr(household, "mortgage_balance") else None,
+                    "mortgage_interest_rate": float(household.mortgage_interest_rate) if hasattr(household, "mortgage_interest_rate") else None,
+                    "mortgage_term": int(household.mortgage_term) if hasattr(household, "mortgage_term") else None,
                 }
 
             units_data.append({
@@ -54,6 +61,7 @@ def _serialize_frame(frame: Dict) -> str:
                 "occupants": unit.get_total_household_size() if hasattr(unit, "get_total_household_size") else 0,
                 "rent": int(unit.rent) if hasattr(unit, "rent") else 0,
                 "is_occupied": bool(unit.occupied) if hasattr(unit, "occupied") else False,
+                "is_owner_occupied": bool(unit.is_owner_occupied) if hasattr(unit, "is_owner_occupied") else False,
                 "quality": float(unit.quality) if hasattr(unit, "quality") else 0.0,
                 "lastRenovation": int(unit.last_renovation) if hasattr(unit, "last_renovation") else 0,
                 "household": household_info if household_info else None

@@ -9,12 +9,13 @@ from models.market import RentalMarket
 from models.policy import RentCapPolicy, LandValueTaxPolicy
 
 class Simulation:
-    def __init__(self, households, landlords, rental_market, policy, years=1):
+    def __init__(self, households, landlords, rental_market, policy, years=1, migration_rate=0.1):
         self.households = households
         self.landlords = landlords
         self.rental_market = rental_market
         self.policy = policy
         self.years = years
+        self.migration_rate = migration_rate  # Store migration rate
         self.metrics = []
         self.property_tax_rate = 0.02  # 2% per year
         self.wealth_tax_rate = 0.012   # 1.2% per year
@@ -164,6 +165,97 @@ class Simulation:
         
         # Remove merged households
         self.households = [h for h in self.households if h not in households_to_remove]
+        
+        # 4. Migration: New households entering from outside
+        current_population = len(self.households)
+        if current_population > 0:  # Only if we have existing households
+            # Calculate expected new arrivals based on migration rate
+            expected_arrivals = max(0, int(current_population * self.migration_rate * 0.5))  # Half of migration rate for arrivals
+            
+            # Add some randomness - Poisson-like distribution
+            actual_arrivals = max(0, random.randint(0, expected_arrivals * 2))
+            
+            for _ in range(actual_arrivals):
+                new_household = self._create_new_household()
+                self.households.append(new_household)
+                actions_this_step += 1
+                
+                # Record the arrival event
+                arrival_event = {
+                    "type": "HOUSEHOLD_ARRIVAL",
+                    "household_id": new_household.id,
+                    "household_name": new_household.name,
+                    "household_size": new_household.size,
+                    "income": new_household.income,
+                    "reason": "Migration into area"
+                }
+                self.events_this_period.append(arrival_event)
+        
+        # 5. Migration: Households leaving the simulation entirely
+        if len(self.households) > 0:
+            # Calculate expected departures based on migration rate
+            expected_departures = max(0, int(len(self.households) * self.migration_rate * 0.5))  # Half of migration rate for departures
+            
+            # Households more likely to leave if:
+            # - Unhoused for extended periods
+            # - High financial stress
+            # - Very low satisfaction
+            departure_candidates = []
+            
+            for household in self.households:
+                if household in households_to_remove:
+                    continue
+                    
+                departure_chance = 0.01  # Base 1% chance per period
+                
+                # Increase chance if unhoused
+                if not household.housed:
+                    departure_chance += 0.03
+                
+                # Increase chance if high rent burden
+                if household.contract:
+                    rent_burden = household.current_rent_burden()
+                    if rent_burden > 0.6:  # Very high burden
+                        departure_chance += 0.02
+                    elif rent_burden > 0.8:  # Extreme burden
+                        departure_chance += 0.04
+                
+                # Increase chance if very low satisfaction
+                if hasattr(household, 'satisfaction') and household.satisfaction < 0.3:
+                    departure_chance += 0.02
+                
+                # Cap at migration rate to keep it reasonable
+                departure_chance = min(departure_chance, self.migration_rate)
+                
+                if random.random() < departure_chance:
+                    departure_candidates.append(household)
+            
+            # Limit to expected number but allow some variation
+            max_departures = min(len(departure_candidates), expected_departures + random.randint(0, 2))
+            departing_households = random.sample(departure_candidates, max_departures) if departure_candidates else []
+            
+            for household in departing_households:
+                # If household is housed, vacate the unit first
+                if household.contract and household.contract.unit:
+                    unit = household.contract.unit
+                    unit.vacate()
+                
+                # Record the departure event
+                departure_event = {
+                    "type": "HOUSEHOLD_DEPARTURE", 
+                    "household_id": household.id,
+                    "household_name": household.name,
+                    "household_size": household.size,
+                    "was_housed": household.housed,
+                    "reason": "Migration out of area"
+                }
+                self.events_this_period.append(departure_event)
+                
+                households_to_remove.add(household)
+                actions_this_step += 1
+            
+            # Remove departing households
+            self.households = [h for h in self.households if h not in households_to_remove]
         
         return actions_this_step
 
@@ -496,59 +588,104 @@ class Simulation:
         
         # Check all households
         for household in self.households:
-            if household.housed and household.contract and household.contract.unit:
-                unit = household.contract.unit
-                
-                # Ensure household is in unit's tenant list
-                if household not in unit.tenants:
-                    print(f"WARNING: HH {household.id} claims to live in Unit {unit.id} but not in tenant list. Adding.")
-                    unit.tenants.append(household)
+            if household.housed:
+                if household.is_owner_occupier:
+                    # Owner-occupier validation
+                    unit = getattr(household, 'owned_unit', None)
+                    if unit:
+                        # Ensure unit is properly set as owner-occupied
+                        if not unit.is_owner_occupied or unit.owner != household:
+                            print(f"WARNING: HH {household.id} owns Unit {unit.id} but unit ownership not properly set. Fixing.")
+                            unit.assign_owner(household)
+                            issues_fixed += 1
+                    else:
+                        # Owner-occupier but no unit - try to find it
+                        found_unit = None
+                        for l in self.landlords:
+                            for u in l.units:
+                                if u.is_owner_occupied and u.owner == household:
+                                    found_unit = u
+                                    break
+                            if found_unit:
+                                break
+                        
+                        if found_unit:
+                            print(f"WARNING: HH {household.id} is owner but no owned_unit reference. Fixing.")
+                            household.owned_unit = found_unit
+                            issues_fixed += 1
+                        else:
+                            print(f"WARNING: HH {household.id} claims to be owner but no unit found. Fixing.")
+                            household.housed = False
+                            household.is_owner_occupier = False
+                            issues_fixed += 1
+                            
+                elif household.contract and household.contract.unit:
+                    # Renter validation
+                    unit = household.contract.unit
+                    
+                    # Ensure household is in unit's tenant list
+                    if household not in unit.tenants:
+                        print(f"WARNING: HH {household.id} claims to live in Unit {unit.id} but not in tenant list. Adding.")
+                        unit.tenants.append(household)
+                        issues_fixed += 1
+                    
+                    # Ensure unit is marked as occupied
+                    if not unit.occupied:
+                        print(f"WARNING: Unit {unit.id} has tenants but marked as vacant. Fixing.")
+                        unit.occupied = True
+                        unit.tenant = unit.tenants[0]  # Set primary tenant
+                        issues_fixed += 1
+                else:
+                    # Household thinks it's housed but has no contract or ownership
+                    print(f"WARNING: HH {household.id} thinks it's housed but has no contract or ownership. Fixing.")
+                    household.housed = False
                     issues_fixed += 1
-                
-                # Ensure unit is marked as occupied
-                if not unit.occupied:
-                    print(f"WARNING: Unit {unit.id} has tenants but marked as vacant. Fixing.")
-                    unit.occupied = True
-                    unit.tenant = unit.tenants[0]  # Set primary tenant
-                    issues_fixed += 1
-            
-            elif household.housed and not household.contract:
-                # Household thinks it's housed but has no contract
-                print(f"WARNING: HH {household.id} thinks it's housed but has no contract. Fixing.")
-                household.housed = False
-                issues_fixed += 1
         
         # Check all units
         for unit in self.rental_market.units:
-            if unit.occupied and unit.tenants:
-                # Ensure all tenants in unit have valid contracts pointing to this unit
-                for tenant in unit.tenants[:]:  # Use slice copy to avoid modification during iteration
-                    if not tenant.housed or not tenant.contract or tenant.contract.unit != unit:
-                        print(f"WARNING: Unit {unit.id} has tenant HH {tenant.id} but relationship broken. Fixing.")
-                        unit.tenants.remove(tenant)
-                        tenant.housed = False
-                        tenant.contract = None
+            if unit.occupied:
+                if unit.is_owner_occupied:
+                    # Owner-occupied unit validation
+                    if not unit.owner:
+                        print(f"WARNING: Unit {unit.id} marked as owner-occupied but no owner. Marking vacant.")
+                        unit.occupied = False
+                        unit.is_owner_occupied = False
                         issues_fixed += 1
-                
-                # If no valid tenants remain, mark unit as vacant
-                if not unit.tenants:
-                    print(f"WARNING: Unit {unit.id} marked occupied but no valid tenants. Marking vacant.")
+                    elif not unit.owner.housed or not unit.owner.is_owner_occupier:
+                        print(f"WARNING: Unit {unit.id} has owner HH {unit.owner.id} but relationship broken. Fixing.")
+                        unit.occupied = False
+                        unit.is_owner_occupied = False
+                        unit.owner = None
+                        issues_fixed += 1
+                elif unit.tenants:
+                    # Rental unit validation
+                    # Ensure all tenants in unit have valid contracts pointing to this unit
+                    for tenant in unit.tenants[:]:  # Use slice copy to avoid modification during iteration
+                        if not tenant.housed or not tenant.contract or tenant.contract.unit != unit:
+                            print(f"WARNING: Unit {unit.id} has tenant HH {tenant.id} but relationship broken. Fixing.")
+                            unit.tenants.remove(tenant)
+                            tenant.housed = False
+                            tenant.contract = None
+                            issues_fixed += 1
+                    
+                    # If no valid tenants remain, mark unit as vacant
+                    if not unit.tenants:
+                        print(f"WARNING: Unit {unit.id} marked occupied but no valid tenants. Marking vacant.")
+                        unit.occupied = False
+                        unit.tenant = None
+                        issues_fixed += 1
+                    else:
+                        # Update primary tenant
+                        unit.tenant = unit.tenants[0]
+                else:
+                    # Unit marked occupied but no tenants and not owner-occupied
+                    print(f"WARNING: Unit {unit.id} marked occupied but no tenants or owner. Marking vacant.")
                     unit.occupied = False
                     unit.tenant = None
                     issues_fixed += 1
-                else:
-                    # Update primary tenant
-                    unit.tenant = unit.tenants[0]
             
-            elif unit.occupied and not unit.tenants:
-                # Unit marked occupied but no tenants
-                print(f"WARNING: Unit {unit.id} marked occupied but no tenants. Marking vacant.")
-                unit.occupied = False
-                unit.tenant = None
-                issues_fixed += 1
-            
-            elif not unit.occupied and unit.tenants:
-                # Unit marked vacant but has tenants
+            elif not unit.occupied and not unit.is_owner_occupied and unit.tenants:
+                # Rental unit marked vacant but has tenants
                 print(f"WARNING: Unit {unit.id} marked vacant but has tenants. Fixing.")
                 unit.occupied = True
                 unit.tenant = unit.tenants[0]

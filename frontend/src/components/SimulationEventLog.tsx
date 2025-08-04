@@ -16,6 +16,8 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 
 // Theme colors
 const colors = {
@@ -46,6 +48,8 @@ interface Event {
   other_household_id?: number;
   other_household_size?: number;
   combined_size?: number;
+  household_size?: number;
+  was_housed?: boolean;
 }
 
 interface PolicyMetrics {
@@ -81,6 +85,10 @@ const EventLog: React.FC<EventLogProps> = ({ events, policyMetrics, year, period
           return <ArrowUpwardIcon sx={{ color: colors.vacant }} />;
         }
         return <ArrowForwardIcon sx={{ color: colors.info }} />;
+      case 'HOUSEHOLD_ARRIVAL':
+        return <PersonAddIcon sx={{ color: colors.success }} />;
+      case 'HOUSEHOLD_DEPARTURE':
+        return <PersonRemoveIcon sx={{ color: colors.warning }} />;
       default:
         return <PersonIcon sx={{ color: colors.info }} />;
     }
@@ -88,26 +96,58 @@ const EventLog: React.FC<EventLogProps> = ({ events, policyMetrics, year, period
 
   const getEventDescription = (event: Event) => {
     switch (event.type) {
+      case 'HOUSEHOLD_SPLIT':
+      case 'HOUSEHOLD_BREAKUP':
       case 'household_split':
-        return `Household ${event.household_name} split (Size ${event.original_size} → ${event.remaining_size})`;
+      case 'household_breakup':
+        const splitReason = (event.original_size && event.original_size > 4) ? 'overcrowding' : 
+                           (event.remaining_size === 1) ? 'seeking independence' : 
+                           'family changes';
+        return `${event.household_name} family split due to ${splitReason} (${event.original_size || 0} → ${event.remaining_size || 0} members)`;
+      
+      case 'HOUSEHOLD_MERGE':
+      case 'HOUSEHOLD_MERGER':
       case 'household_merge':
-        return `Household ${event.household_name} merged with another (New size: ${event.combined_size})`;
+      case 'household_merger':
+        return `${event.household_name} welcomed another family to live together (now ${event.combined_size || 0} people)`;
+      
       case 'rent_adjustment':
         return `Rent adjusted for ${event.household_name} (Burden: ${event.rent_burden?.toFixed(1)}%)`;
+      
       case 'renovation':
-        return `Property ${event.to_unit_id} renovated`;
+        return `Property ${event.to_unit_id} renovated to improve conditions`;
+      
       case 'HOUSING_SEARCH':
         return `${event.household_name} searched for housing - ${event.reason}`;
+      
       case 'MOVE':
+      case 'MOVE_IN':
+      case 'MOVE_OUT':
         if (event.to_unit_id !== null && event.from_unit_id === null) {
-          return `${event.household_name} entered the market (Unit ${event.to_unit_id})`;
+          return `${event.household_name} found housing and moved into Unit ${event.to_unit_id}`;
         }
         if (event.from_unit_id !== null && event.to_unit_id === null) {
-          return `${event.household_name} left the market (From Unit ${event.from_unit_id})`;
+          const reason = event.reason;
+          if (reason === 'Became Unhoused') {
+            return `${event.household_name} had to leave Unit ${event.from_unit_id} due to financial difficulties`;
+          } else if (reason?.includes('Affordability')) {
+            return `${event.household_name} left Unit ${event.from_unit_id} to find more affordable housing`;
+          } else {
+            return `${event.household_name} moved out of Unit ${event.from_unit_id} seeking better housing`;
+          }
         }
-        return `${event.household_name} moved from Unit ${event.from_unit_id} to Unit ${event.to_unit_id}`;
+        const moveReason = event.reason ? ` seeking ${event.reason.toLowerCase().replace('better ', '')}` : '';
+        return `${event.household_name} moved from Unit ${event.from_unit_id} to Unit ${event.to_unit_id}${moveReason}`;
+      
+      case 'HOUSEHOLD_ARRIVAL':
+        return `${event.household_name} arrived in the area as new residents looking for housing (family of ${event.household_size || event.new_household_size || 'unknown'})`;
+      
+      case 'HOUSEHOLD_DEPARTURE':
+        const wasHousedText = event.was_housed ? 'relocated out of the area' : 'left after being unable to find suitable housing';
+        return `${event.household_name} ${wasHousedText}`;
+      
       default:
-        return `${event.type} event for ${event.household_name}`;
+        return `${event.household_name}: ${event.type.toLowerCase().replace(/_/g, ' ')}`;
     }
   };
 
